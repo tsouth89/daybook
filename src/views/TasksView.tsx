@@ -25,6 +25,7 @@ function parseTasks(md: string): TaskLine[] {
 
 export default function TasksView({ onError }: Props) {
   const [body, setBody] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
   const tasks = parseTasks(body);
   const open = tasks.filter((t) => !t.done);
   const done = tasks.filter((t) => t.done);
@@ -42,10 +43,12 @@ export default function TasksView({ onError }: Props) {
   }, [refresh]);
 
   useEffect(() => {
-    const onFocus = () => refresh();
+    const onFocus = () => {
+      if (editing === null) refresh();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
+  }, [refresh, editing]);
 
   async function toggle(line: number) {
     try {
@@ -55,50 +58,88 @@ export default function TasksView({ onError }: Props) {
     }
   }
 
-  if (!tasks.length) {
-    return (
-      <div className="empty">
-        <h2>No tasks yet</h2>
-        <p className="dim">
-          Tasks appear when triage routes a capture as a task — appointments, reminders, things to
-          do.
-        </p>
-      </div>
-    );
+  async function save() {
+    if (editing === null) return;
+    try {
+      await api.writeTasks(editing);
+      setBody(editing);
+      setEditing(null);
+    } catch (e) {
+      onError(errText(e));
+    }
   }
 
   return (
-    <div className="content tasks-view">
-      {open.length > 0 && (
-        <section>
-          <h3 className="section-label">Open ({open.length})</h3>
-          <ul className="tasklist">
-            {open.map((t) => (
-              <li key={t.line}>
-                <label>
-                  <input type="checkbox" checked={false} onChange={() => toggle(t.line)} />
-                  <span>{t.text}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {done.length > 0 && (
-        <section>
-          <h3 className="section-label dim">Done ({done.length})</h3>
-          <ul className="tasklist done">
-            {done.map((t) => (
-              <li key={t.line}>
-                <label>
-                  <input type="checkbox" checked onChange={() => toggle(t.line)} />
-                  <span>{t.text}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+    <div className="detail" style={{ flex: 1 }}>
+      <div className="toolbar">
+        <div className="dim tiny">Tasks</div>
+        <div className="grow" />
+        {editing === null ? (
+          <button className="btn" onClick={() => setEditing(body || "# Tasks\n\n")}>
+            Edit markdown
+          </button>
+        ) : (
+          <>
+            <button className="btn" onClick={() => setEditing(null)}>
+              Cancel
+            </button>
+            <button className="btn primary" onClick={save}>
+              Save
+            </button>
+          </>
+        )}
+      </div>
+      <div className="content tasks-view">
+        {editing !== null ? (
+          <textarea
+            className="rawedit"
+            value={editing}
+            onChange={(e) => setEditing(e.target.value)}
+            spellCheck={false}
+          />
+        ) : !tasks.length ? (
+          <div className="empty" style={{ padding: 0 }}>
+            <h2>No tasks yet</h2>
+            <p className="dim">
+              Tasks appear from triage, or Edit markdown and add{" "}
+              <span className="mono">- [ ] …</span> checkboxes yourself.
+            </p>
+          </div>
+        ) : (
+          <>
+            {open.length > 0 && (
+              <section>
+                <h3 className="section-label">Open ({open.length})</h3>
+                <ul className="tasklist">
+                  {open.map((t) => (
+                    <li key={t.line}>
+                      <label>
+                        <input type="checkbox" checked={false} onChange={() => toggle(t.line)} />
+                        <span>{t.text}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {done.length > 0 && (
+              <section>
+                <h3 className="section-label dim">Done ({done.length})</h3>
+                <ul className="tasklist done">
+                  {done.map((t) => (
+                    <li key={t.line}>
+                      <label>
+                        <input type="checkbox" checked onChange={() => toggle(t.line)} />
+                        <span>{t.text}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

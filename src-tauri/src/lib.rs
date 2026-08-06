@@ -186,6 +186,95 @@ fn write_raw(state: tauri::State<AppState>, date: String, content: String) -> Cm
 }
 
 #[tauri::command]
+fn write_note(state: tauri::State<AppState>, date: String, content: String) -> CmdResult<()> {
+    vault::write_note(&state.settings().vault(), &date, &content).map_err(err)
+}
+
+#[tauri::command]
+fn write_entity(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+    content: String,
+) -> CmdResult<()> {
+    vault::write_entity(&state.settings().vault(), &kind, &slug, &content).map_err(err)
+}
+
+#[tauri::command]
+fn write_personal(state: tauri::State<AppState>, content: String) -> CmdResult<()> {
+    vault::write_personal(&state.settings().vault(), &content).map_err(err)
+}
+
+#[tauri::command]
+fn write_ideas(state: tauri::State<AppState>, content: String) -> CmdResult<()> {
+    vault::write_ideas(&state.settings().vault(), &content).map_err(err)
+}
+
+#[tauri::command]
+fn write_tasks(state: tauri::State<AppState>, content: String) -> CmdResult<()> {
+    vault::write_tasks(&state.settings().vault(), &content).map_err(err)
+}
+
+#[tauri::command]
+fn create_entity(
+    state: tauri::State<AppState>,
+    kind: String,
+    name: String,
+    scope: String,
+) -> CmdResult<vault::ProjectMeta> {
+    vault::create_entity(&state.settings().vault(), &kind, &name, &scope).map_err(err)
+}
+
+#[tauri::command]
+async fn refresh_entity_overview(
+    state: tauri::State<'_, AppState>,
+    kind: String,
+    slug: String,
+) -> CmdResult<String> {
+    let s = state.settings();
+    let v = s.vault();
+    let page = vault::read_entity(&v, &kind, &slug).map_err(err)?;
+    let name = vault::read_projects_config(&v)
+        .into_iter()
+        .find(|p| p.slug == slug)
+        .map(|p| p.name)
+        .unwrap_or_else(|| slug.clone());
+    let overview = ai::refresh_overview(ai::OverviewRequest {
+        provider: s.normalized_provider(),
+        api_key: &s.resolved_api_key(),
+        model: &s.model,
+        effort: &s.effort,
+        title: &name,
+        kind: &kind,
+        page_markdown: &page,
+    })
+    .await
+    .map_err(err)?;
+    vault::set_entity_overview(&v, &kind, &slug, &overview).map_err(err)?;
+    vault::read_entity(&v, &kind, &slug).map_err(err)
+}
+
+#[tauri::command]
+async fn refresh_personal_overview(state: tauri::State<'_, AppState>) -> CmdResult<String> {
+    let s = state.settings();
+    let v = s.vault();
+    let page = vault::read_personal(&v);
+    let overview = ai::refresh_overview(ai::OverviewRequest {
+        provider: s.normalized_provider(),
+        api_key: &s.resolved_api_key(),
+        model: &s.model,
+        effort: &s.effort,
+        title: "Personal",
+        kind: "personal",
+        page_markdown: &page,
+    })
+    .await
+    .map_err(err)?;
+    vault::set_personal_overview(&v, &overview).map_err(err)?;
+    Ok(vault::read_personal(&v))
+}
+
+#[tauri::command]
 fn list_projects(state: tauri::State<AppState>) -> CmdResult<Vec<vault::ProjectEntry>> {
     vault::list_projects(&state.settings().vault()).map_err(err)
 }
@@ -453,6 +542,77 @@ fn apply_triage(
     })
 }
 
+async fn refresh_touched_overviews(
+    v: &std::path::Path,
+    s: &Settings,
+    processed: &[ItemProcessResult],
+) {
+    if s.resolved_api_key().is_empty() {
+        return;
+    }
+    let provider = s.normalized_provider().to_string();
+    let api_key = s.resolved_api_key();
+
+    let mut entities: Vec<(String, String, String)> = Vec::new(); // kind, slug, name
+    let mut personal = false;
+    for r in processed {
+        for d in &r.destinations {
+            if d == "personal" {
+                personal = true;
+            }
+            if let Some((kind, slug)) = d.split_once('/') {
+                if kind == "project" || kind == "area" {
+                    if !entities.iter().any(|(k, s, _)| k == kind && s == slug) {
+                        let name = vault::read_projects_config(v)
+                            .into_iter()
+                            .find(|p| p.slug == slug)
+                            .map(|p| p.name)
+                            .unwrap_or_else(|| slug.to_string());
+                        entities.push((kind.to_string(), slug.to_string(), name));
+                    }
+                }
+            }
+        }
+    }
+
+    for (kind, slug, name) in entities {
+        let page = match vault::read_entity(v, &kind, &slug) {
+            Ok(p) if !p.trim().is_empty() => p,
+            _ => continue,
+        };
+        if let Ok(overview) = ai::refresh_overview(ai::OverviewRequest {
+            provider: &provider,
+            api_key: &api_key,
+            model: &s.model,
+            effort: &s.effort,
+            title: &name,
+            kind: &kind,
+            page_markdown: &page,
+        })
+        .await
+        {
+            let _ = vault::set_entity_overview(v, &kind, &slug, &overview);
+        }
+    }
+
+    if personal {
+        let page = vault::read_personal(v);
+        if let Ok(overview) = ai::refresh_overview(ai::OverviewRequest {
+            provider: &provider,
+            api_key: &api_key,
+            model: &s.model,
+            effort: &s.effort,
+            title: "Personal",
+            kind: "personal",
+            page_markdown: &page,
+        })
+        .await
+        {
+            let _ = vault::set_personal_overview(v, &overview);
+        }
+    }
+}
+
 /// Drain the inbox. If `date` is set, only process items from that day.
 /// Failed items stay in the inbox.
 #[tauri::command]
@@ -523,6 +683,9 @@ async fn process_inbox(
     if learned_any {
         vault::write_projects_config(&v, &known).map_err(err)?;
     }
+
+    // Standing overviews: rewrite ## Overview only for pages this batch touched.
+    refresh_touched_overviews(&v, &s, &processed).await;
 
     Ok(InboxProcessResult { processed, errors })
 }
@@ -652,6 +815,14 @@ pub fn run() {
             list_days,
             read_day,
             write_raw,
+            write_note,
+            write_entity,
+            write_personal,
+            write_ideas,
+            write_tasks,
+            create_entity,
+            refresh_entity_overview,
+            refresh_personal_overview,
             list_projects,
             read_project,
             read_entity,

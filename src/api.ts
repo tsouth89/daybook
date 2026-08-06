@@ -99,11 +99,20 @@ export const api = {
   readDay: (date: string) => invoke<DayContent>("read_day", { date }),
   writeRaw: (date: string, content: string) =>
     invoke<void>("write_raw", { date, content }),
+  writeNote: (date: string, content: string) =>
+    invoke<void>("write_note", { date, content }),
 
   listProjects: () => invoke<ProjectEntry[]>("list_projects"),
   readProject: (slug: string) => invoke<string>("read_project", { slug }),
   readEntity: (kind: string, slug: string) =>
     invoke<string>("read_entity", { kind, slug }),
+  writeEntity: (kind: string, slug: string, content: string) =>
+    invoke<void>("write_entity", { kind, slug, content }),
+  createEntity: (kind: string, name: string, scope: string) =>
+    invoke<ProjectMeta>("create_entity", { kind, name, scope }),
+  refreshEntityOverview: (kind: string, slug: string) =>
+    invoke<string>("refresh_entity_overview", { kind, slug }),
+  refreshPersonalOverview: () => invoke<string>("refresh_personal_overview"),
 
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
 
@@ -120,6 +129,9 @@ export const api = {
   readTasks: () => invoke<string>("read_tasks"),
   readIdeas: () => invoke<string>("read_ideas"),
   readPersonal: () => invoke<string>("read_personal"),
+  writePersonal: (content: string) => invoke<void>("write_personal", { content }),
+  writeIdeas: (content: string) => invoke<void>("write_ideas", { content }),
+  writeTasks: (content: string) => invoke<void>("write_tasks", { content }),
   listHistory: () => invoke<HistoryItem[]>("list_history"),
   readHistoryItem: (date: string, id: string) =>
     invoke<string>("read_history_item", { date, id }),

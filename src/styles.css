@@ -158,6 +158,13 @@ kbd {
 }
 .list-head.filters { flex-wrap: wrap; gap: 4px; }
 .list-head > .btn { margin-left: auto; }
+.createbox {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  background: var(--bg-2);
+}
 .row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .row.gap > * { flex: 1; }
 .row > :first-child { flex: 1; }

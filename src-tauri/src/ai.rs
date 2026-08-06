@@ -581,3 +581,168 @@ pub fn primary_title(entries: &[RoutedEntry], summary: &[String]) -> String {
     }
     "Entry".into()
 }
+
+// ---------------------------------------------------------------------------
+// Overview refresh — rewrite standing summary only, leave dated history alone.
+// ---------------------------------------------------------------------------
+
+pub struct OverviewRequest<'a> {
+    pub provider: &'a str,
+    pub api_key: &'a str,
+    pub model: &'a str,
+    pub effort: &'a str,
+    pub title: &'a str,
+    pub kind: &'a str, // "project" | "area" | "personal"
+    pub page_markdown: &'a str,
+}
+
+/// Returns markdown body for the Overview section (no ## Overview heading).
+pub async fn refresh_overview(req: OverviewRequest<'_>) -> Result<String> {
+    if req.api_key.is_empty() {
+        bail!("No API key set for overview refresh.");
+    }
+    let system = format!(
+        "You maintain the standing Overview section of a {kind} page named \"{title}\" in a \
+         personal daybook.\n\n\
+         Rules:\n\
+         1. Output ONLY the Overview body as markdown bullets (3–8 lines). No heading, no dated \
+         history sections, no preamble.\n\
+         2. Summarize what is currently true: status, open threads, recent progress, important \
+         decisions. Prefer current state over a full chronology.\n\
+         3. Never invent. If the page is thin, write a thin overview.\n\
+         4. Keep the author's vocabulary; do not make it corporate.\n\
+         5. Ignore attachments paths; focus on the written content.\n",
+        kind = req.kind,
+        title = req.title,
+    );
+    let user = format!(
+        "Rewrite the Overview for this page. Return bullets only.\n\n<page>\n{}\n</page>",
+        req.page_markdown.trim()
+    );
+
+    let text = match req.provider {
+        "deepseek" => {
+            overview_openai_compatible(req.api_key, req.model, DEEPSEEK_URL, false, &system, &user)
+                .await?
+        }
+        "anthropic" => overview_anthropic(req.api_key, req.model, req.effort, &system, &user).await?,
+        _ => {
+            overview_openai_compatible(req.api_key, req.model, OPENAI_URL, true, &system, &user)
+                .await?
+        }
+    };
+
+    let cleaned = text
+        .trim()
+        .trim_start_matches("```markdown")
+        .trim_start_matches("```md")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    // Drop a mistaken Overview heading if the model adds one.
+    let cleaned = cleaned
+        .strip_prefix("## Overview")
+        .or_else(|| cleaned.strip_prefix("# Overview"))
+        .unwrap_or(cleaned)
+        .trim();
+    if cleaned.is_empty() {
+        bail!("Overview refresh returned empty text.");
+    }
+    Ok(cleaned.to_string())
+}
+
+async fn overview_anthropic(
+    api_key: &str,
+    model: &str,
+    effort: &str,
+    system: &str,
+    user: &str,
+) -> Result<String> {
+    let body = json!({
+        "model": model,
+        "max_tokens": 1500,
+        "system": system,
+        "output_config": { "effort": effort },
+        "messages": [{ "role": "user", "content": user }]
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let resp = client
+        .post(ANTHROPIC_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+    let status = resp.status();
+    let text = resp.text().await?;
+    if !status.is_success() {
+        bail!(
+            "Anthropic API error {}: {}",
+            status.as_u16(),
+            extract_error_message(&text)
+        );
+    }
+    let v: serde_json::Value = serde_json::from_str(&text)?;
+    v["content"]
+        .as_array()
+        .and_then(|blocks| {
+            blocks
+                .iter()
+                .find(|b| b["type"] == "text")
+                .and_then(|b| b["text"].as_str())
+        })
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("No text block in the Anthropic overview response"))
+}
+
+async fn overview_openai_compatible(
+    api_key: &str,
+    model: &str,
+    url: &str,
+    openai: bool,
+    system: &str,
+    user: &str,
+) -> Result<String> {
+    let mut body = json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user }
+        ]
+    });
+    if openai {
+        body["max_completion_tokens"] = json!(1500);
+        body["reasoning_effort"] = json!("low");
+    } else {
+        body["max_tokens"] = json!(1500);
+        body["thinking"] = json!({ "type": "disabled" });
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+    let resp = client
+        .post(url)
+        .header("authorization", format!("Bearer {api_key}"))
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+    let status = resp.status();
+    let text = resp.text().await?;
+    if !status.is_success() {
+        let label = if openai { "OpenAI" } else { "DeepSeek" };
+        bail!(
+            "{label} API error {}: {}",
+            status.as_u16(),
+            extract_error_message(&text)
+        );
+    }
+    let v: serde_json::Value = serde_json::from_str(&text)?;
+    v["choices"][0]["message"]["content"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("No content in the overview response"))
+}

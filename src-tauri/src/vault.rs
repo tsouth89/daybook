@@ -622,6 +622,159 @@ fn overview_title_from_body(body: &str) -> String {
     String::new()
 }
 
+/// Replace the ## Overview section body. Creates the section if missing.
+pub fn replace_overview_section(content: &str, overview_body: &str) -> String {
+    let body = overview_body.trim();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut start = None;
+    let mut end = lines.len();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() == "## Overview" {
+            start = Some(i);
+            continue;
+        }
+        if start.is_some() && line.starts_with("## ") {
+            end = i;
+            break;
+        }
+    }
+    let section = {
+        let mut s = String::from("## Overview\n\n");
+        s.push_str(body);
+        if !body.ends_with('\n') {
+            s.push('\n');
+        }
+        s.push('\n');
+        s
+    };
+    if let Some(s) = start {
+        let before = lines[..s].join("\n");
+        let after = lines[end..].join("\n");
+        let mut out = String::new();
+        if !before.is_empty() {
+            out.push_str(&before);
+            out.push_str("\n\n");
+        }
+        out.push_str(&section);
+        if !after.is_empty() {
+            out.push_str(&after);
+            if !after.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        return out;
+    }
+    // Insert after first # title line.
+    let mut out = String::new();
+    let mut inserted = false;
+    for (i, line) in lines.iter().enumerate() {
+        out.push_str(line);
+        out.push('\n');
+        if !inserted && line.starts_with("# ") {
+            // Skip blank lines immediately after title, then insert.
+            let mut j = i + 1;
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+            out.push('\n');
+            out.push_str(&section);
+            for rest in lines.iter().skip(j) {
+                out.push_str(rest);
+                out.push('\n');
+            }
+            inserted = true;
+            break;
+        }
+    }
+    if !inserted {
+        out.push_str(&section);
+    }
+    out
+}
+
+pub fn write_entity(v: &Path, kind: &str, slug: &str, content: &str) -> Result<()> {
+    ensure_vault(v)?;
+    let kind = if kind == "area" { "area" } else { "project" };
+    let slug = slugify(slug);
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    std::fs::write(dir.join(format!("{slug}.md")), content)?;
+    Ok(())
+}
+
+pub fn write_personal(v: &Path, content: &str) -> Result<()> {
+    ensure_vault(v)?;
+    std::fs::write(personal_path(v), content)?;
+    Ok(())
+}
+
+pub fn write_ideas(v: &Path, content: &str) -> Result<()> {
+    ensure_vault(v)?;
+    std::fs::write(ideas_path(v), content)?;
+    Ok(())
+}
+
+pub fn write_tasks(v: &Path, content: &str) -> Result<()> {
+    ensure_vault(v)?;
+    std::fs::write(tasks_path(v), content)?;
+    Ok(())
+}
+
+pub fn set_entity_overview(v: &Path, kind: &str, slug: &str, overview_body: &str) -> Result<()> {
+    let existing = read_entity(v, kind, slug)?;
+    let next = replace_overview_section(&existing, overview_body);
+    write_entity(v, kind, slug, &next)
+}
+
+pub fn set_personal_overview(v: &Path, overview_body: &str) -> Result<()> {
+    let existing = read_personal(v);
+    let next = replace_overview_section(&existing, overview_body);
+    write_personal(v, &next)
+}
+
+/// Create an empty project/area page and register it in projects.json.
+pub fn create_entity(
+    v: &Path,
+    kind: &str,
+    name: &str,
+    scope: &str,
+) -> Result<ProjectMeta> {
+    ensure_vault(v)?;
+    let kind = if kind == "area" { "area" } else { "project" };
+    let scope = if scope == "personal" { "personal" } else { "work" };
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("Name is required");
+    }
+    let slug = slugify(name);
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    if path.exists() {
+        anyhow::bail!("A {kind} named '{slug}' already exists");
+    }
+    let body = format!(
+        "---\nslug: {slug}\nname: {name}\ntype: {kind}\nscope: {scope}\n---\n\n\
+         # {name}\n\n\
+         ## Overview\n\n\
+         - _(nothing filed yet)_\n\n"
+    );
+    std::fs::write(&path, body)?;
+
+    let meta = ProjectMeta {
+        slug: slug.clone(),
+        name: name.to_string(),
+        kind: kind.to_string(),
+        scope: scope.to_string(),
+        aliases: vec![],
+        description: String::new(),
+    };
+    let mut known = read_projects_config(v);
+    if !known.iter().any(|k| k.slug == slug) {
+        known.push(meta.clone());
+        write_projects_config(v, &known)?;
+    }
+    Ok(meta)
+}
+
 #[derive(Debug, Serialize)]
 pub struct ProjectEntry {
     pub slug: String,
@@ -1003,7 +1156,13 @@ pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
     }
     by_date.retain(|(_, items)| !items.is_empty());
     by_date.sort_by(|a, b| b.0.cmp(&a.0));
+    std::fs::write(&path, render_personal_document(&by_date))?;
+    Ok(())
+}
 
+fn render_personal_document(
+    by_date: &[(String, Vec<(String, String, String, String, String)>)],
+) -> String {
     let mut out = String::new();
     out.push_str(
         "# Personal\n\n\
@@ -1011,18 +1170,36 @@ pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
          personal-scoped also appears here as a short pointer; the full log lives on the\n\
          project page.\n\n",
     );
+    out.push_str("## Overview\n\n");
+    out.push_str("Standing view of personal life threads. Dated log is below.\n\n");
+    let mut overview_lines = 0usize;
+    for (d, items) in by_date {
+        for (_id, _t, tit, dest, _b) in items {
+            out.push_str(&format!("- **{d}**: {tit} · {dest}\n"));
+            overview_lines += 1;
+            if overview_lines >= 8 {
+                break;
+            }
+        }
+        if overview_lines >= 8 {
+            break;
+        }
+    }
+    if overview_lines == 0 {
+        out.push_str("- _(nothing filed yet)_\n");
+    }
+    out.push('\n');
     for (d, items) in by_date {
         out.push_str(&format!("## {d}\n\n"));
         for (id, t, tit, dest, b) in items {
             out.push_str(&format!("### {t} · `{id}` · {tit} · {dest}\n\n"));
             if !b.is_empty() {
-                out.push_str(&b);
+                out.push_str(b);
                 out.push_str("\n\n");
             }
         }
     }
-    std::fs::write(&path, out)?;
-    Ok(())
+    out
 }
 
 /// Upsert one personal-scoped entry into personal.md (newest dates first).
@@ -1124,25 +1301,7 @@ pub fn upsert_personal_item(
         by_date.push((date.to_string(), vec![entry]));
     }
     by_date.sort_by(|a, b| b.0.cmp(&a.0));
-
-    let mut out = String::new();
-    out.push_str(
-        "# Personal\n\n\
-         Life notes and personal-scoped entries over time. Project work that happens to be\n\
-         personal-scoped also appears here as a short pointer; the full log lives on the\n\
-         project page.\n\n",
-    );
-    for (d, items) in by_date {
-        out.push_str(&format!("## {d}\n\n"));
-        for (id, t, tit, dest, b) in items {
-            out.push_str(&format!("### {t} · `{id}` · {tit} · {dest}\n\n"));
-            if !b.is_empty() {
-                out.push_str(&b);
-                out.push_str("\n\n");
-            }
-        }
-    }
-    std::fs::write(&path, out)?;
+    std::fs::write(&path, render_personal_document(&by_date))?;
     Ok(())
 }
 

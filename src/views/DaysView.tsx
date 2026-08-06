@@ -64,9 +64,21 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
   }
 
   async function saveRaw() {
-    if (!selected || editing === null) return;
+    if (!selected || editing === null || pane !== "raw") return;
     try {
       await api.writeRaw(selected, editing);
+      setContent(await api.readDay(selected));
+      setEditing(null);
+      onChanged();
+    } catch (e) {
+      onError(errText(e));
+    }
+  }
+
+  async function saveNote() {
+    if (!selected || editing === null || pane !== "note") return;
+    try {
+      await api.writeNote(selected, editing);
       setContent(await api.readDay(selected));
       setEditing(null);
       onChanged();
@@ -114,38 +126,51 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
               <div className="tabs">
                 <button
                   className={`tab ${pane === "note" ? "active" : ""}`}
-                  onClick={() => setPane("note")}
-                  disabled={!content.note}
+                  onClick={() => {
+                    setPane("note");
+                    setEditing(null);
+                  }}
+                  disabled={!content.note && editing === null}
                 >
                   Note
                 </button>
                 <button
                   className={`tab ${pane === "raw" ? "active" : ""}`}
-                  onClick={() => setPane("raw")}
+                  onClick={() => {
+                    setPane("raw");
+                    setEditing(null);
+                  }}
                 >
                   Raw
                 </button>
               </div>
               <div className="grow" />
-              {pane === "raw" &&
-                (editing === null ? (
-                  <button className="btn" onClick={() => setEditing(content.raw)}>
-                    Edit raw
+              {editing === null ? (
+                <button
+                  className="btn"
+                  onClick={() =>
+                    setEditing(pane === "note" ? content.note || "" : content.raw)
+                  }
+                >
+                  Edit {pane}
+                </button>
+              ) : (
+                <>
+                  <button className="btn" onClick={() => setEditing(null)}>
+                    Cancel
                   </button>
-                ) : (
-                  <>
-                    <button className="btn" onClick={() => setEditing(null)}>
-                      Cancel
-                    </button>
-                    <button className="btn primary" onClick={saveRaw}>
-                      Save raw
-                    </button>
-                  </>
-                ))}
+                  <button
+                    className="btn primary"
+                    onClick={pane === "note" ? saveNote : saveRaw}
+                  >
+                    Save {pane}
+                  </button>
+                </>
+              )}
               <button
                 className="btn primary"
                 onClick={process}
-                disabled={busy || pending === 0}
+                disabled={busy || pending === 0 || editing !== null}
                 title={
                   pending === 0
                     ? "No pending inbox items for this day"
@@ -171,15 +196,15 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
             )}
 
             <div className="content">
-              {pane === "note" ? (
-                <Markdown text={content.note} vaultPath={vaultPath} />
-              ) : editing !== null ? (
+              {editing !== null ? (
                 <textarea
                   className="rawedit"
                   value={editing}
                   onChange={(e) => setEditing(e.target.value)}
                   spellCheck={false}
                 />
+              ) : pane === "note" ? (
+                <Markdown text={content.note} vaultPath={vaultPath} />
               ) : (
                 <pre className="raw">{content.raw || "Nothing archived on this day."}</pre>
               )}
