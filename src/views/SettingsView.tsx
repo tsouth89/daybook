@@ -8,18 +8,14 @@ type Props = {
 };
 
 const PROVIDERS = [
-  ["deepseek", "DeepSeek — cheapest, default for triage"],
-  ["openai", "OpenAI — Luna / Terra fallback"],
+  ["openai", "OpenAI — Luna default, Terra if needed"],
   ["anthropic", "Anthropic — Claude"],
+  ["deepseek", "DeepSeek — cheapest (China-hosted)"],
 ] as const;
 
 const MODELS: Record<string, [string, string][]> = {
-  deepseek: [
-    ["deepseek-v4-flash", "V4 Flash — default ($0.14/$0.28 per Mtok)"],
-    ["deepseek-v4-pro", "V4 Pro — if Flash misroutes ($0.44/$0.87)"],
-  ],
   openai: [
-    ["gpt-5.6-luna", "Luna — cheap OpenAI fallback ($0.20/$1.20)"],
+    ["gpt-5.6-luna", "Luna — default ($0.20/$1.20 per Mtok)"],
     ["gpt-5.6-terra", "Terra — more power if needed ($2/$12)"],
   ],
   anthropic: [
@@ -27,28 +23,32 @@ const MODELS: Record<string, [string, string][]> = {
     ["claude-sonnet-5", "Sonnet 5 ($3/$15)"],
     ["claude-opus-5", "Opus 5 ($5/$25)"],
   ],
+  deepseek: [
+    ["deepseek-v4-flash", "V4 Flash — cheapest ($0.14/$0.28)"],
+    ["deepseek-v4-pro", "V4 Pro ($0.44/$0.87)"],
+  ],
 };
 
 function defaultModelFor(provider: string): string {
-  return MODELS[provider]?.[0]?.[0] ?? "deepseek-v4-flash";
+  return MODELS[provider]?.[0]?.[0] ?? "gpt-5.6-luna";
 }
 
 function keyField(
   provider: Settings["provider"]
 ): "deepseek_api_key" | "openai_api_key" | "anthropic_api_key" {
   switch (provider) {
-    case "openai":
-      return "openai_api_key";
+    case "deepseek":
+      return "deepseek_api_key";
     case "anthropic":
       return "anthropic_api_key";
     default:
-      return "deepseek_api_key";
+      return "openai_api_key";
   }
 }
 
 function keyPlaceholder(provider: string): string {
   switch (provider) {
-    case "openai":
+    case "deepseek":
       return "sk-…";
     case "anthropic":
       return "sk-ant-…";
@@ -59,12 +59,12 @@ function keyPlaceholder(provider: string): string {
 
 function keyEnvHint(provider: string): string {
   switch (provider) {
-    case "openai":
-      return "OPENAI_API_KEY";
+    case "deepseek":
+      return "DEEPSEEK_API_KEY";
     case "anthropic":
       return "ANTHROPIC_API_KEY";
     default:
-      return "DEEPSEEK_API_KEY";
+      return "OPENAI_API_KEY";
   }
 }
 
@@ -192,8 +192,9 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
           </select>
         </label>
         <p className="dim tiny">
-          Default is DeepSeek V4 Flash — triage is cheap classification work. Switch to Luna if
-          Flash misroutes; Terra only if you need more power.
+          Default is GPT-5.6 Luna — cheap enough for daily triage without sending journal text to
+          China-hosted infra. Bump to Terra if routing quality is thin; DeepSeek stays available if
+          you ever want the absolute cheapest option.
         </p>
         <label>
           <span>Effort</span>
@@ -209,8 +210,8 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
           </select>
         </label>
         <p className="dim tiny">
-          Used by OpenAI (reasoning effort) and Anthropic. DeepSeek Flash runs with thinking
-          disabled for this pass regardless — keep it fast.
+          Used by OpenAI (reasoning effort) and Anthropic. Ignored on DeepSeek, where triage runs
+          with thinking disabled.
         </p>
         <label>
           <span>Context days</span>

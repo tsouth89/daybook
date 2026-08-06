@@ -10,12 +10,12 @@ type Tab = "inbox" | "days" | "projects" | "search" | "settings";
 
 function hasProviderKey(s: Settings): boolean {
   switch (s.provider) {
-    case "openai":
-      return !!s.openai_api_key.trim();
+    case "deepseek":
+      return !!s.deepseek_api_key.trim();
     case "anthropic":
       return !!(s.anthropic_api_key.trim() || s.api_key.trim());
     default:
-      return !!s.deepseek_api_key.trim();
+      return !!s.openai_api_key.trim();
   }
 }
 

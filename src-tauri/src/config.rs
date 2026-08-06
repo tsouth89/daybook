@@ -35,10 +35,10 @@ pub struct Settings {
 }
 
 fn default_provider() -> String {
-    "deepseek".into()
+    "openai".into()
 }
 fn default_model() -> String {
-    "deepseek-v4-flash".into()
+    "gpt-5.6-luna".into()
 }
 fn default_effort() -> String {
     // Triage is classification + light rewrite, not deep reasoning.
@@ -84,16 +84,16 @@ impl Settings {
 
     pub fn normalized_provider(&self) -> &str {
         match self.provider.to_lowercase().as_str() {
-            "openai" => "openai",
+            "deepseek" => "deepseek",
             "anthropic" => "anthropic",
-            _ => "deepseek",
+            _ => "openai",
         }
     }
 
     /// Key for the active provider. Falls back to the matching env var.
     pub fn resolved_api_key(&self) -> String {
         let (stored, env_name) = match self.normalized_provider() {
-            "openai" => (self.openai_api_key.trim(), "OPENAI_API_KEY"),
+            "deepseek" => (self.deepseek_api_key.trim(), "DEEPSEEK_API_KEY"),
             "anthropic" => {
                 let k = if !self.anthropic_api_key.trim().is_empty() {
                     self.anthropic_api_key.trim()
@@ -103,7 +103,7 @@ impl Settings {
                 };
                 (k, "ANTHROPIC_API_KEY")
             }
-            _ => (self.deepseek_api_key.trim(), "DEEPSEEK_API_KEY"),
+            _ => (self.openai_api_key.trim(), "OPENAI_API_KEY"),
         };
         if !stored.is_empty() {
             return stored.to_string();
@@ -125,25 +125,49 @@ impl Settings {
         }
 
         // Pre-provider installs saved claude-* with no provider field. Serde now
-        // defaults provider to deepseek, which would call DeepSeek with a Claude
-        // model id. Reconcile:
-        // - If they already have an Anthropic key, keep them on Anthropic.
-        // - Otherwise move them onto Flash (the new cheap default).
-        if self.normalized_provider() == "deepseek" && self.model.starts_with("claude") {
+        // defaults provider to openai. Reconcile:
+        // - Anthropic key present → stay on Anthropic.
+        // - DeepSeek key present (and no OpenAI key) → stay on DeepSeek.
+        // - Otherwise land on Luna (the new default).
+        if self.normalized_provider() == "openai" && self.model.starts_with("claude") {
             if !self.anthropic_api_key.trim().is_empty() {
                 self.provider = "anthropic".into();
+            } else if !self.deepseek_api_key.trim().is_empty()
+                && self.openai_api_key.trim().is_empty()
+            {
+                self.provider = "deepseek".into();
+                if !self.model.starts_with("deepseek") {
+                    self.model = "deepseek-v4-flash".into();
+                }
             } else {
                 self.model = default_model();
             }
         }
+        // Same reconciliation if an intermediate build defaulted them onto DeepSeek
+        // with a Claude model id still saved.
+        if self.normalized_provider() == "deepseek" && self.model.starts_with("claude") {
+            if !self.anthropic_api_key.trim().is_empty() {
+                self.provider = "anthropic".into();
+            } else {
+                self.provider = "openai".into();
+                self.model = default_model();
+            }
+        }
+        // Intermediate default was DeepSeek Flash. If they never pasted a DeepSeek
+        // key, move them onto Luna — journal text stays off China-hosted infra.
+        if self.normalized_provider() == "deepseek" && self.deepseek_api_key.trim().is_empty() {
+            self.provider = "openai".into();
+            self.model = default_model();
+        }
+
         if self.normalized_provider() == "openai" && !self.model.starts_with("gpt-") {
-            self.model = "gpt-5.6-luna".into();
+            self.model = default_model();
         }
         if self.normalized_provider() == "anthropic" && !self.model.starts_with("claude") {
             self.model = "claude-haiku-4-5".into();
         }
         if self.normalized_provider() == "deepseek" && !self.model.starts_with("deepseek") {
-            self.model = default_model();
+            self.model = "deepseek-v4-flash".into();
         }
     }
 }

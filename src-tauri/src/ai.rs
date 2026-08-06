@@ -219,9 +219,9 @@ pub struct TriageRequest<'a> {
 pub async fn triage_item(req: TriageRequest<'_>) -> Result<TriageResult> {
     if req.api_key.is_empty() {
         let hint = match req.provider {
-            "openai" => "OpenAI API key (or OPENAI_API_KEY)",
+            "deepseek" => "DeepSeek API key (or DEEPSEEK_API_KEY)",
             "anthropic" => "Anthropic API key (or ANTHROPIC_API_KEY)",
-            _ => "DeepSeek API key (or DEEPSEEK_API_KEY)",
+            _ => "OpenAI API key (or OPENAI_API_KEY)",
         };
         bail!("No {hint} set. Add one in Settings.");
     }
@@ -230,9 +230,9 @@ pub async fn triage_item(req: TriageRequest<'_>) -> Result<TriageResult> {
     }
 
     let json_text = match req.provider {
+        "deepseek" => call_openai_compatible(&req, DEEPSEEK_URL, false).await?,
         "anthropic" => call_anthropic(&req).await?,
-        "openai" => call_openai_compatible(&req, OPENAI_URL, true).await?,
-        _ => call_openai_compatible(&req, DEEPSEEK_URL, false).await?,
+        _ => call_openai_compatible(&req, OPENAI_URL, true).await?,
     };
 
     parse_triage_json(&json_text)

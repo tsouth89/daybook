@@ -61,9 +61,9 @@ A failed triage leaves the item sitting in the inbox.
 
 ## Cost
 
-Default model is DeepSeek V4 Flash (~$0.14/$0.28 per Mtok). A normal day of triage is
-fractions of a cent. OpenAI Luna/Terra and Anthropic Claude are available in Settings if
-Flash misroutes or you want a stronger pass later.
+Default model is GPT-5.6 Luna (~$0.20/$1.20 per Mtok). A normal month of triage is well under
+a dollar. Terra and Anthropic Claude are available if you need more power; DeepSeek remains an
+option if you ever want the absolute cheapest pass.
 
 ## Development
 
