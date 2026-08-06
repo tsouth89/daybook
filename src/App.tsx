@@ -8,6 +8,17 @@ import SettingsView from "./views/SettingsView";
 
 type Tab = "inbox" | "days" | "projects" | "search" | "settings";
 
+function hasProviderKey(s: Settings): boolean {
+  switch (s.provider) {
+    case "openai":
+      return !!s.openai_api_key.trim();
+    case "anthropic":
+      return !!(s.anthropic_api_key.trim() || s.api_key.trim());
+    default:
+      return !!s.deepseek_api_key.trim();
+  }
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>("inbox");
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -47,7 +58,7 @@ export default function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshDays, refreshInbox]);
 
-  const needsKey = settings && !settings.api_key.trim();
+  const needsKey = settings && !hasProviderKey(settings);
 
   return (
     <div className="shell">
@@ -90,7 +101,7 @@ export default function App() {
         )}
         {needsKey && tab !== "settings" && (
           <div className="banner warn">
-            No API key set, so captures stay in the inbox until you add one.{" "}
+            No API key set for the current provider, so captures stay in the inbox until you add one.{" "}
             <button className="linkbtn" onClick={() => setTab("settings")}>
               Add one in Settings
             </button>

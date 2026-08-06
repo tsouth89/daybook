@@ -7,11 +7,66 @@ type Props = {
   onError: (m: string) => void;
 };
 
-const MODELS = [
-  ["claude-opus-5", "Opus 5 — best quality ($5/$25 per Mtok)"],
-  ["claude-sonnet-5", "Sonnet 5 — cheaper, still strong ($3/$15)"],
-  ["claude-haiku-4-5", "Haiku 4.5 — fastest, thinnest output ($1/$5)"],
-];
+const PROVIDERS = [
+  ["deepseek", "DeepSeek — cheapest, default for triage"],
+  ["openai", "OpenAI — Luna / Terra fallback"],
+  ["anthropic", "Anthropic — Claude"],
+] as const;
+
+const MODELS: Record<string, [string, string][]> = {
+  deepseek: [
+    ["deepseek-v4-flash", "V4 Flash — default ($0.14/$0.28 per Mtok)"],
+    ["deepseek-v4-pro", "V4 Pro — if Flash misroutes ($0.44/$0.87)"],
+  ],
+  openai: [
+    ["gpt-5.6-luna", "Luna — cheap OpenAI fallback ($0.20/$1.20)"],
+    ["gpt-5.6-terra", "Terra — more power if needed ($2/$12)"],
+  ],
+  anthropic: [
+    ["claude-haiku-4-5", "Haiku 4.5 — thin/fast ($1/$5)"],
+    ["claude-sonnet-5", "Sonnet 5 ($3/$15)"],
+    ["claude-opus-5", "Opus 5 ($5/$25)"],
+  ],
+};
+
+function defaultModelFor(provider: string): string {
+  return MODELS[provider]?.[0]?.[0] ?? "deepseek-v4-flash";
+}
+
+function keyField(
+  provider: Settings["provider"]
+): "deepseek_api_key" | "openai_api_key" | "anthropic_api_key" {
+  switch (provider) {
+    case "openai":
+      return "openai_api_key";
+    case "anthropic":
+      return "anthropic_api_key";
+    default:
+      return "deepseek_api_key";
+  }
+}
+
+function keyPlaceholder(provider: string): string {
+  switch (provider) {
+    case "openai":
+      return "sk-…";
+    case "anthropic":
+      return "sk-ant-…";
+    default:
+      return "sk-…";
+  }
+}
+
+function keyEnvHint(provider: string): string {
+  switch (provider) {
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    default:
+      return "DEEPSEEK_API_KEY";
+  }
+}
 
 export default function SettingsView({ settings, onSaved, onError }: Props) {
   const [draft, setDraft] = useState<Settings>(settings);
@@ -89,29 +144,57 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
       <section>
         <h3>Model</h3>
         <label>
-          <span>API key</span>
-          <input
-            type="password"
-            className="mono"
-            value={draft.api_key}
-            placeholder="sk-ant-…"
-            onChange={(e) => set("api_key", e.target.value)}
-          />
-        </label>
-        <p className="dim tiny">
-          Stored in the app's own config directory, never in the vault. Leave blank to fall back to
-          the ANTHROPIC_API_KEY environment variable.
-        </p>
-        <label>
-          <span>Model</span>
-          <select value={draft.model} onChange={(e) => set("model", e.target.value)}>
-            {MODELS.map(([id, label]) => (
+          <span>Provider</span>
+          <select
+            value={draft.provider}
+            onChange={(e) => {
+              const provider = e.target.value as Settings["provider"];
+              const models = MODELS[provider] ?? [];
+              const modelOk = models.some(([id]) => id === draft.model);
+              setDraft({
+                ...draft,
+                provider,
+                model: modelOk ? draft.model : defaultModelFor(provider),
+              });
+              setSaved(false);
+            }}
+          >
+            {PROVIDERS.map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>
             ))}
           </select>
         </label>
+        <label>
+          <span>API key</span>
+          <input
+            type="password"
+            className="mono"
+            value={draft[keyField(draft.provider)]}
+            placeholder={keyPlaceholder(draft.provider)}
+            onChange={(e) => set(keyField(draft.provider), e.target.value)}
+          />
+        </label>
+        <p className="dim tiny">
+          Stored in the app config directory, never in the vault. Each provider keeps its own key so
+          switching does not wipe the others. Leave blank to fall back to{" "}
+          <span className="mono">{keyEnvHint(draft.provider)}</span>.
+        </p>
+        <label>
+          <span>Model</span>
+          <select value={draft.model} onChange={(e) => set("model", e.target.value)}>
+            {(MODELS[draft.provider] ?? []).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="dim tiny">
+          Default is DeepSeek V4 Flash — triage is cheap classification work. Switch to Luna if
+          Flash misroutes; Terra only if you need more power.
+        </p>
         <label>
           <span>Effort</span>
           <select
@@ -126,8 +209,8 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
           </select>
         </label>
         <p className="dim tiny">
-          Summarising a day is not an intelligence-heavy task, so medium is the default. Raise it if
-          summaries come out thin or projects get mis-routed.
+          Used by OpenAI (reasoning effort) and Anthropic. DeepSeek Flash runs with thinking
+          disabled for this pass regardless — keep it fast.
         </p>
         <label>
           <span>Context days</span>
@@ -140,8 +223,8 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
           />
         </label>
         <p className="dim tiny">
-          How many previous day summaries get sent along so the model can resolve "that thing from
-          yesterday".
+          Reserved for continuity context on future passes. Triage currently uses profile + known
+          projects only.
         </p>
       </section>
 

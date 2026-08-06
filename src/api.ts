@@ -2,8 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type Settings = {
   vault_path: string;
-  api_key: string;
+  provider: "deepseek" | "openai" | "anthropic";
   model: string;
+  deepseek_api_key: string;
+  openai_api_key: string;
+  anthropic_api_key: string;
+  /** @deprecated migrated into anthropic_api_key */
+  api_key: string;
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   capture_hotkey: string;
   context_days: number;

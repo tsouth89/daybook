@@ -61,8 +61,9 @@ A failed triage leaves the item sitting in the inbox.
 
 ## Cost
 
-A short capture is a couple thousand tokens. On Opus that is cents, not dollars.
-Conversation (later) is where cost shows up — not the daily triage pass.
+Default model is DeepSeek V4 Flash (~$0.14/$0.28 per Mtok). A normal day of triage is
+fractions of a cent. OpenAI Luna/Terra and Anthropic Claude are available in Settings if
+Flash misroutes or you want a stronger pass later.
 
 ## Development
 

@@ -7,12 +7,24 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub vault_path: String,
-    /// Anthropic API key. Empty until the user sets it in Settings.
-    #[serde(default)]
-    pub api_key: String,
+    /// deepseek | openai | anthropic
+    #[serde(default = "default_provider")]
+    pub provider: String,
     #[serde(default = "default_model")]
     pub model: String,
-    /// low | medium | high | xhigh | max
+    /// DeepSeek API key (platform.deepseek.com).
+    #[serde(default)]
+    pub deepseek_api_key: String,
+    /// OpenAI API key (Luna / Terra).
+    #[serde(default)]
+    pub openai_api_key: String,
+    /// Anthropic API key.
+    #[serde(default)]
+    pub anthropic_api_key: String,
+    /// Legacy single-key field. Migrated into anthropic_api_key on load.
+    #[serde(default)]
+    pub api_key: String,
+    /// Provider-specific effort/thinking hint: low | medium | high | xhigh | max
     #[serde(default = "default_effort")]
     pub effort: String,
     #[serde(default = "default_hotkey")]
@@ -22,12 +34,14 @@ pub struct Settings {
     pub context_days: usize,
 }
 
+fn default_provider() -> String {
+    "deepseek".into()
+}
 fn default_model() -> String {
-    "claude-opus-5".into()
+    "deepseek-v4-flash".into()
 }
 fn default_effort() -> String {
-    // Summarising a day of dictation is not an intelligence-sensitive task.
-    // medium keeps it fast and cheap; bump to high in Settings if output is thin.
+    // Triage is classification + light rewrite, not deep reasoning.
     "medium".into()
 }
 fn default_hotkey() -> String {
@@ -44,8 +58,12 @@ impl Default for Settings {
             .unwrap_or_else(|| PathBuf::from("Journal"));
         Settings {
             vault_path: vault.to_string_lossy().into_owned(),
-            api_key: String::new(),
+            provider: default_provider(),
             model: default_model(),
+            deepseek_api_key: String::new(),
+            openai_api_key: String::new(),
+            anthropic_api_key: String::new(),
+            api_key: String::new(),
             effort: default_effort(),
             capture_hotkey: default_hotkey(),
             context_days: default_context_days(),
@@ -64,12 +82,69 @@ impl Settings {
         PathBuf::from(&self.vault_path)
     }
 
-    /// Falls back to the environment so you can run without storing a key on disk.
-    pub fn resolved_api_key(&self) -> String {
-        if !self.api_key.trim().is_empty() {
-            return self.api_key.trim().to_string();
+    pub fn normalized_provider(&self) -> &str {
+        match self.provider.to_lowercase().as_str() {
+            "openai" => "openai",
+            "anthropic" => "anthropic",
+            _ => "deepseek",
         }
-        std::env::var("ANTHROPIC_API_KEY").unwrap_or_default()
+    }
+
+    /// Key for the active provider. Falls back to the matching env var.
+    pub fn resolved_api_key(&self) -> String {
+        let (stored, env_name) = match self.normalized_provider() {
+            "openai" => (self.openai_api_key.trim(), "OPENAI_API_KEY"),
+            "anthropic" => {
+                let k = if !self.anthropic_api_key.trim().is_empty() {
+                    self.anthropic_api_key.trim()
+                } else {
+                    // Legacy field from before multi-provider support.
+                    self.api_key.trim()
+                };
+                (k, "ANTHROPIC_API_KEY")
+            }
+            _ => (self.deepseek_api_key.trim(), "DEEPSEEK_API_KEY"),
+        };
+        if !stored.is_empty() {
+            return stored.to_string();
+        }
+        std::env::var(env_name).unwrap_or_default()
+    }
+
+    /// Pull legacy `api_key` into `anthropic_api_key` so old settings keep working.
+    /// Also reconcile provider/model when settings predate multi-provider support.
+    pub fn migrate_keys(&mut self) {
+        if self.anthropic_api_key.trim().is_empty() && !self.api_key.trim().is_empty() {
+            self.anthropic_api_key = self.api_key.trim().to_string();
+        }
+        if self.provider.trim().is_empty() {
+            self.provider = default_provider();
+        }
+        if self.model.trim().is_empty() {
+            self.model = default_model();
+        }
+
+        // Pre-provider installs saved claude-* with no provider field. Serde now
+        // defaults provider to deepseek, which would call DeepSeek with a Claude
+        // model id. Reconcile:
+        // - If they already have an Anthropic key, keep them on Anthropic.
+        // - Otherwise move them onto Flash (the new cheap default).
+        if self.normalized_provider() == "deepseek" && self.model.starts_with("claude") {
+            if !self.anthropic_api_key.trim().is_empty() {
+                self.provider = "anthropic".into();
+            } else {
+                self.model = default_model();
+            }
+        }
+        if self.normalized_provider() == "openai" && !self.model.starts_with("gpt-") {
+            self.model = "gpt-5.6-luna".into();
+        }
+        if self.normalized_provider() == "anthropic" && !self.model.starts_with("claude") {
+            self.model = "claude-haiku-4-5".into();
+        }
+        if self.normalized_provider() == "deepseek" && !self.model.starts_with("deepseek") {
+            self.model = default_model();
+        }
     }
 }
 
@@ -79,10 +154,12 @@ pub fn settings_path(config_dir: &PathBuf) -> PathBuf {
 
 pub fn load(config_dir: &PathBuf) -> Settings {
     let path = settings_path(config_dir);
-    std::fs::read_to_string(&path)
+    let mut settings = std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    settings.migrate_keys();
+    settings
 }
 
 pub fn save(config_dir: &PathBuf, settings: &Settings) -> Result<()> {

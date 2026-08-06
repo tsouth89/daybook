@@ -349,6 +349,7 @@ async fn process_inbox(
     let s = state.settings();
     let v = s.vault();
     let api_key = s.resolved_api_key();
+    let provider = s.normalized_provider().to_string();
     let mut known = vault::read_projects_config(&v);
     let glossary = vault::read_glossary(&v);
     let profile = vault::read_profile(&v);
@@ -372,6 +373,7 @@ async fn process_inbox(
 
     for item in &items {
         let triage = match ai::triage_item(ai::TriageRequest {
+            provider: &provider,
             api_key: &api_key,
             model: &s.model,
             effort: &s.effort,
