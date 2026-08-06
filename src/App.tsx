@@ -1,14 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type DayEntry, type Settings } from "./api";
 import DaysView from "./views/DaysView";
+import HistoryView from "./views/HistoryView";
 import IdeasView from "./views/IdeasView";
 import InboxView from "./views/InboxView";
+import PersonalView from "./views/PersonalView";
 import ProjectsView from "./views/ProjectsView";
 import SearchView from "./views/SearchView";
 import SettingsView from "./views/SettingsView";
 import TasksView from "./views/TasksView";
 
-type Tab = "inbox" | "days" | "projects" | "tasks" | "ideas" | "search" | "settings";
+type Tab =
+  | "inbox"
+  | "days"
+  | "personal"
+  | "projects"
+  | "tasks"
+  | "ideas"
+  | "history"
+  | "search"
+  | "settings";
 
 function hasProviderKey(s: Settings): boolean {
   switch (s.provider) {
@@ -74,9 +85,11 @@ export default function App() {
           [
             ["inbox", inboxCount ? `Inbox (${inboxCount})` : "Inbox"],
             ["days", "Days"],
+            ["personal", "Personal"],
             ["projects", "Projects"],
             ["tasks", "Tasks"],
             ["ideas", "Ideas"],
+            ["history", "History"],
             ["search", "Search"],
             ["settings", "Settings"],
           ] as [Tab, string][]
@@ -134,12 +147,18 @@ export default function App() {
             onError={setBanner}
           />
         )}
+        {tab === "personal" && (
+          <PersonalView vaultPath={vaultPath} onError={setBanner} />
+        )}
         {tab === "projects" && (
           <ProjectsView vaultPath={vaultPath} onError={setBanner} />
         )}
         {tab === "tasks" && <TasksView onError={setBanner} />}
         {tab === "ideas" && (
           <IdeasView vaultPath={vaultPath} onError={setBanner} />
+        )}
+        {tab === "history" && (
+          <HistoryView vaultPath={vaultPath} onError={setBanner} />
         )}
         {tab === "search" && <SearchView onError={setBanner} />}
         {tab === "settings" && settings && (

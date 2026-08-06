@@ -42,6 +42,15 @@ export type ProjectMeta = {
   description: string;
 };
 
+export type HistoryItem = {
+  id: string;
+  date: string;
+  time: string;
+  preview: string;
+  chars: number;
+  has_day_note: boolean;
+};
+
 export type InboxItem = {
   id: string;
   date: string;
@@ -110,6 +119,10 @@ export const api = {
   revealVault: () => invoke<void>("reveal_vault"),
   readTasks: () => invoke<string>("read_tasks"),
   readIdeas: () => invoke<string>("read_ideas"),
+  readPersonal: () => invoke<string>("read_personal"),
+  listHistory: () => invoke<HistoryItem[]>("list_history"),
+  readHistoryItem: (date: string, id: string) =>
+    invoke<string>("read_history_item", { date, id }),
   toggleTaskLine: (line: number) => invoke<string>("toggle_task_line", { line }),
   processInbox: (date?: string) =>
     invoke<InboxProcessResult>("process_inbox", { date: date ?? null }),

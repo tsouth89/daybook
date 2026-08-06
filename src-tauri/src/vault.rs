@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 //   areas/<slug>.md          ongoing responsibilities with no end state
 //   ideas.md                 maybe-someday, dated
 //   tasks.md                 open checkboxes, dated
+//   personal.md              rollup of personal-scoped entries over time
 //   attachments/             pasted images
 //   config/projects.json     known projects/areas + aliases (entity resolution)
 //   config/glossary.txt      jargon list, used to repair dictation errors
@@ -101,14 +102,24 @@ pub fn ensure_vault(v: &Path) -> Result<()> {
             "# Daybook vault\n\n\
              Capture drops into `inbox/`. After triage, the verbatim text is archived in `raw/`\n\
              (append-only, never edited by the AI) and routed copies land in `projects/`, `areas/`,\n\
-             `ideas.md`, `tasks.md`, and `days/`.\n\n\
+             `personal.md`, `ideas.md`, `tasks.md`, and `days/`.\n\n\
              Only `inbox/` and `raw/` hold original text. Everything else is a build artifact and\n\
              can be deleted and regenerated. This folder is a valid Obsidian vault — open it\n\
              directly for graph view, backlinks, or hand-written notes in the right place.\n",
         )?;
     }
 
-    for (name, heading) in [("ideas.md", "# Ideas\n\n"), ("tasks.md", "# Tasks\n\n")] {
+    for (name, heading) in [
+        ("ideas.md", "# Ideas\n\n"),
+        ("tasks.md", "# Tasks\n\n"),
+        (
+            "personal.md",
+            "# Personal\n\n\
+             Life notes and personal-scoped entries over time. Project work that happens to be\n\
+             personal-scoped also appears here as a short pointer; the full log lives on the\n\
+             project page.\n\n",
+        ),
+    ] {
         let path = v.join(name);
         if !path.exists() {
             std::fs::write(&path, heading)?;
@@ -132,6 +143,9 @@ pub fn ideas_path(v: &Path) -> PathBuf {
 }
 pub fn tasks_path(v: &Path) -> PathBuf {
     v.join("tasks.md")
+}
+pub fn personal_path(v: &Path) -> PathBuf {
+    v.join("personal.md")
 }
 
 #[allow(dead_code)]
@@ -544,6 +558,30 @@ pub fn upsert_entity_day(
     out.push_str(&format!("scope: {scope}\n"));
     out.push_str("---\n\n");
     out.push_str(&format!("# {name}\n\n"));
+    out.push_str("## Overview\n\n");
+    out.push_str("Standing view of recent activity. Full dated log is below.\n\n");
+    let mut overview_lines = 0usize;
+    for (d, items) in &by_date {
+        for (_id, b) in items {
+            let title = overview_title_from_body(b);
+            if title.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("- **{d}**: {title}\n"));
+            overview_lines += 1;
+            if overview_lines >= 8 {
+                break;
+            }
+        }
+        if overview_lines >= 8 {
+            break;
+        }
+    }
+    if overview_lines == 0 {
+        out.push_str("- _(nothing filed yet)_\n");
+    }
+    out.push('\n');
+
     for (d, items) in by_date {
         out.push_str(&format!("## {d}\n\n"));
         for (id, b) in items {
@@ -563,6 +601,25 @@ pub fn upsert_entity_day(
     }
     std::fs::write(&path, out)?;
     Ok(())
+}
+
+fn overview_title_from_body(body: &str) -> String {
+    for line in body.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("**").and_then(|s| s.strip_suffix("**")) {
+            return rest.trim().chars().take(100).collect();
+        }
+        if t.starts_with("**") && t.ends_with("**") {
+            return t.trim_matches('*').trim().chars().take(100).collect();
+        }
+        if !t.starts_with('#') && !t.starts_with("![") && !t.starts_with("[[") {
+            return t.trim_start_matches(['*', '-', '#', ' ']).chars().take(100).collect();
+        }
+    }
+    String::new()
 }
 
 #[derive(Debug, Serialize)]
@@ -872,6 +929,358 @@ pub fn read_ideas(v: &Path) -> String {
 pub fn read_tasks(v: &Path) -> String {
     ensure_vault(v).ok();
     std::fs::read_to_string(tasks_path(v)).unwrap_or_else(|_| "# Tasks\n\n".into())
+}
+
+pub fn read_personal(v: &Path) -> String {
+    ensure_vault(v).ok();
+    std::fs::read_to_string(personal_path(v)).unwrap_or_else(|_| "# Personal\n\n".into())
+}
+
+/// Remove every personal.md section belonging to a capture id (for re-triage).
+pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
+    ensure_vault(v)?;
+    let path = personal_path(v);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    if existing.is_empty() || !existing.contains(&format!("`{item_id}`")) {
+        return Ok(());
+    }
+
+    let mut by_date: Vec<(String, Vec<(String, String, String, String, String)>)> = Vec::new();
+    let mut cur_date: Option<String> = None;
+    let mut cur_items: Vec<(String, String, String, String, String)> = Vec::new();
+    let mut cur: Option<(String, String, String, String, String)> = None;
+
+    let flush_item =
+        |cur: &mut Option<(String, String, String, String, String)>,
+         cur_items: &mut Vec<(String, String, String, String, String)>| {
+            if let Some(mut item) = cur.take() {
+                item.4 = item.4.trim_end().to_string();
+                cur_items.push(item);
+            }
+        };
+
+    for line in existing.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            let candidate = rest.trim();
+            if valid_date(candidate).is_ok() {
+                flush_item(&mut cur, &mut cur_items);
+                if let Some(d) = cur_date.take() {
+                    by_date.push((d, std::mem::take(&mut cur_items)));
+                }
+                cur_date = Some(candidate.to_string());
+                continue;
+            }
+        }
+        if cur_date.is_none() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("### ") {
+            flush_item(&mut cur, &mut cur_items);
+            let parts: Vec<&str> = rest.splitn(4, " · ").collect();
+            if parts.len() >= 2 {
+                cur = Some((
+                    parts[1].trim().trim_matches('`').to_string(),
+                    parts[0].trim().to_string(),
+                    parts.get(2).unwrap_or(&"Entry").trim().to_string(),
+                    parts.get(3).unwrap_or(&"note").trim().to_string(),
+                    String::new(),
+                ));
+            }
+            continue;
+        }
+        if let Some(ref mut c) = cur {
+            c.4.push_str(line);
+            c.4.push('\n');
+        }
+    }
+    flush_item(&mut cur, &mut cur_items);
+    if let Some(d) = cur_date.take() {
+        by_date.push((d, cur_items));
+    }
+
+    for (_, items) in &mut by_date {
+        items.retain(|(id, _, _, _, _)| id != item_id);
+    }
+    by_date.retain(|(_, items)| !items.is_empty());
+    by_date.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut out = String::new();
+    out.push_str(
+        "# Personal\n\n\
+         Life notes and personal-scoped entries over time. Project work that happens to be\n\
+         personal-scoped also appears here as a short pointer; the full log lives on the\n\
+         project page.\n\n",
+    );
+    for (d, items) in by_date {
+        out.push_str(&format!("## {d}\n\n"));
+        for (id, t, tit, dest, b) in items {
+            out.push_str(&format!("### {t} · `{id}` · {tit} · {dest}\n\n"));
+            if !b.is_empty() {
+                out.push_str(&b);
+                out.push_str("\n\n");
+            }
+        }
+    }
+    std::fs::write(&path, out)?;
+    Ok(())
+}
+
+/// Upsert one personal-scoped entry into personal.md (newest dates first).
+/// `dest` is a short routing label, e.g. `note`, `[[projects/daybook|Daybook]]`, `tasks`.
+pub fn upsert_personal_item(
+    v: &Path,
+    date: &str,
+    item_id: &str,
+    time: &str,
+    title: &str,
+    dest: &str,
+    body: &str,
+) -> Result<()> {
+    valid_date(date)?;
+    ensure_vault(v)?;
+    let path = personal_path(v);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+
+    // (id, time, title, dest, body)
+    let mut by_date: Vec<(String, Vec<(String, String, String, String, String)>)> = Vec::new();
+    let mut cur_date: Option<String> = None;
+    let mut cur_items: Vec<(String, String, String, String, String)> = Vec::new();
+    let mut cur: Option<(String, String, String, String, String)> = None;
+
+    let flush_item =
+        |cur: &mut Option<(String, String, String, String, String)>,
+         cur_items: &mut Vec<(String, String, String, String, String)>| {
+            if let Some(mut item) = cur.take() {
+                item.4 = item.4.trim_end().to_string();
+                cur_items.push(item);
+            }
+        };
+
+    for line in existing.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            let candidate = rest.trim();
+            if valid_date(candidate).is_ok() {
+                flush_item(&mut cur, &mut cur_items);
+                if let Some(d) = cur_date.take() {
+                    by_date.push((d, std::mem::take(&mut cur_items)));
+                }
+                cur_date = Some(candidate.to_string());
+                continue;
+            }
+        }
+        if cur_date.is_none() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("### ") {
+            flush_item(&mut cur, &mut cur_items);
+            let parts: Vec<&str> = rest.splitn(4, " · ").collect();
+            if parts.len() >= 2 {
+                cur = Some((
+                    parts[1].trim().trim_matches('`').to_string(),
+                    parts[0].trim().to_string(),
+                    parts.get(2).unwrap_or(&"Entry").trim().to_string(),
+                    parts.get(3).unwrap_or(&"note").trim().to_string(),
+                    String::new(),
+                ));
+            }
+            continue;
+        }
+        if let Some(ref mut c) = cur {
+            c.4.push_str(line);
+            c.4.push('\n');
+        }
+    }
+    flush_item(&mut cur, &mut cur_items);
+    if let Some(d) = cur_date.take() {
+        by_date.push((d, cur_items));
+    }
+
+    let entry = (
+        item_id.to_string(),
+        time.to_string(),
+        if title.trim().is_empty() {
+            "Entry".into()
+        } else {
+            title.trim().chars().take(80).collect()
+        },
+        if dest.trim().is_empty() {
+            "note".into()
+        } else {
+            dest.trim().to_string()
+        },
+        body.trim().to_string(),
+    );
+
+    let mut found = false;
+    for (d, items) in &mut by_date {
+        if d == date {
+            items.push(entry.clone());
+            items.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)));
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        by_date.push((date.to_string(), vec![entry]));
+    }
+    by_date.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut out = String::new();
+    out.push_str(
+        "# Personal\n\n\
+         Life notes and personal-scoped entries over time. Project work that happens to be\n\
+         personal-scoped also appears here as a short pointer; the full log lives on the\n\
+         project page.\n\n",
+    );
+    for (d, items) in by_date {
+        out.push_str(&format!("## {d}\n\n"));
+        for (id, t, tit, dest, b) in items {
+            out.push_str(&format!("### {t} · `{id}` · {tit} · {dest}\n\n"));
+            if !b.is_empty() {
+                out.push_str(&b);
+                out.push_str("\n\n");
+            }
+        }
+    }
+    std::fs::write(&path, out)?;
+    Ok(())
+}
+
+// ------------------------------------------------------------------- history
+
+#[derive(Debug, Serialize)]
+pub struct HistoryItem {
+    pub id: String,
+    pub date: String,
+    pub time: String,
+    pub preview: String,
+    pub chars: usize,
+    pub has_day_note: bool,
+}
+
+/// Chronological capture archive from raw/, newest first.
+pub fn list_history(v: &Path, limit: usize) -> Result<Vec<HistoryItem>> {
+    let mut items = Vec::new();
+    let Ok(rd) = std::fs::read_dir(raw_dir(v)) else {
+        return Ok(items);
+    };
+    let mut dates: Vec<String> = rd
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.strip_suffix(".md").map(|s| s.to_string())
+        })
+        .filter(|s| valid_date(s).is_ok())
+        .collect();
+    dates.sort();
+    dates.reverse();
+
+    for date in dates {
+        let text = read_raw(v, &date).unwrap_or_default();
+        let has_day_note = !read_note(v, &date).unwrap_or_default().trim().is_empty();
+        let mut cur_time = String::new();
+        let mut cur_id = String::new();
+        let mut cur_body = String::new();
+
+        let flush = |items: &mut Vec<HistoryItem>,
+                     date: &str,
+                     time: &str,
+                     id: &str,
+                     body: &str,
+                     has_day_note: bool| {
+            let body = body.trim();
+            if body.is_empty() && time.is_empty() {
+                return;
+            }
+            items.push(HistoryItem {
+                id: id.to_string(),
+                date: date.to_string(),
+                time: time.to_string(),
+                chars: body.chars().count(),
+                preview: preview_of(body),
+                has_day_note,
+            });
+        };
+
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("## ") {
+                flush(
+                    &mut items,
+                    &date,
+                    &cur_time,
+                    &cur_id,
+                    &cur_body,
+                    has_day_note,
+                );
+                cur_body.clear();
+                cur_id.clear();
+                // `15:30 · `id`` or just `15:30`
+                if let Some((t, rest)) = rest.split_once(" · ") {
+                    cur_time = t.trim().to_string();
+                    cur_id = rest.trim().trim_matches('`').to_string();
+                } else {
+                    cur_time = rest.trim().to_string();
+                }
+                continue;
+            }
+            if line.starts_with("# ") {
+                continue;
+            }
+            cur_body.push_str(line);
+            cur_body.push('\n');
+        }
+        flush(
+            &mut items,
+            &date,
+            &cur_time,
+            &cur_id,
+            &cur_body,
+            has_day_note,
+        );
+        if items.len() >= limit {
+            break;
+        }
+    }
+
+    // Newest first: dates already newest-first; within a day sections were
+    // flushed in file order (usually chronological), so reverse each day's
+    // batch... easier: sort all by date desc, time desc.
+    items.sort_by(|a, b| b.date.cmp(&a.date).then(b.time.cmp(&a.time)));
+    items.truncate(limit);
+    Ok(items)
+}
+
+pub fn read_history_item(v: &Path, date: &str, id: &str) -> Result<String> {
+    valid_date(date)?;
+    let text = read_raw(v, date)?;
+    if id.trim().is_empty() {
+        return Ok(text);
+    }
+    let needle = format!("`{id}`");
+    let mut collecting = false;
+    let mut out = String::new();
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            if collecting {
+                break;
+            }
+            collecting = line.contains(&needle);
+            if collecting {
+                out.push_str(line);
+                out.push('\n');
+            }
+            continue;
+        }
+        if collecting {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        Ok(text)
+    } else {
+        Ok(out)
+    }
 }
 
 /// Flip `- [ ]` ↔ `- [x]` on a 1-based line number in tasks.md.

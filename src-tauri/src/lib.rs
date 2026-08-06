@@ -133,6 +133,25 @@ fn read_ideas(state: tauri::State<AppState>) -> String {
 }
 
 #[tauri::command]
+fn read_personal(state: tauri::State<AppState>) -> String {
+    vault::read_personal(&state.settings().vault())
+}
+
+#[tauri::command]
+fn list_history(state: tauri::State<AppState>) -> CmdResult<Vec<vault::HistoryItem>> {
+    vault::list_history(&state.settings().vault(), 200).map_err(err)
+}
+
+#[tauri::command]
+fn read_history_item(
+    state: tauri::State<AppState>,
+    date: String,
+    id: String,
+) -> CmdResult<String> {
+    vault::read_history_item(&state.settings().vault(), &date, &id).map_err(err)
+}
+
+#[tauri::command]
 fn toggle_task_line(state: tauri::State<AppState>, line: usize) -> CmdResult<String> {
     vault::toggle_task_line(&state.settings().vault(), line).map_err(err)
 }
@@ -309,6 +328,62 @@ fn apply_triage(
             }
             _ => {
                 destinations.push(format!("note ({})", e.scope));
+            }
+        }
+    }
+
+    // Personal rollup: every personal-scoped entry also lands in personal.md.
+    let has_personal = triage.entries.iter().any(|e| e.scope == "personal");
+    if has_personal {
+        vault::clear_personal_item(v, &item.id).map_err(err)?;
+        for e in &triage.entries {
+            if e.scope != "personal" {
+                continue;
+            }
+            let dest = match e.kind.as_str() {
+                "project" => format!("[[projects/{}|{}]]", e.slug, e.name),
+                "area" => format!("[[areas/{}|{}]]", e.slug, e.name),
+                "idea" => "ideas".into(),
+                "task" => "tasks".into(),
+                _ => "note".into(),
+            };
+            // Full body for notes; short pointer for things that have their own page.
+            let body = match e.kind.as_str() {
+                "note" => e.body.clone(),
+                "project" | "area" => {
+                    if e.body.trim().is_empty() {
+                        format!("See {dest}")
+                    } else {
+                        // Keep it short on the personal rollup.
+                        let excerpt: String = e.body.chars().take(280).collect();
+                        format!("{excerpt}\n\n→ {dest}")
+                    }
+                }
+                _ => {
+                    if e.body.trim().is_empty() {
+                        e.title.clone()
+                    } else {
+                        e.body.clone()
+                    }
+                }
+            };
+            let body = if e.kind == "note" {
+                vault::ensure_attachment_markdown(&item.text, &body)
+            } else {
+                body
+            };
+            vault::upsert_personal_item(
+                v,
+                &item.date,
+                &item.id,
+                &item.time,
+                &e.title,
+                &dest,
+                &body,
+            )
+            .map_err(err)?;
+            if !destinations.iter().any(|d| d.starts_with("personal")) {
+                destinations.push("personal".into());
             }
         }
     }
@@ -570,6 +645,9 @@ pub fn run() {
             show_capture,
             read_tasks,
             read_ideas,
+            read_personal,
+            list_history,
+            read_history_item,
             toggle_task_line,
             list_days,
             read_day,

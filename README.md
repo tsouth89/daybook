@@ -20,8 +20,9 @@ destroy the source.
 inbox/                     ingress. Anything can drop a file here.
 raw/YYYY-MM-DD.md          append-only archive of triaged items. Source of truth.
 days/YYYY-MM-DD.md         generated view over the day's entries
-projects/<slug>.md         things with an end state
+projects/<slug>.md         project home (overview + dated log)
 areas/<slug>.md            ongoing responsibilities (health, finances, house)
+personal.md                rollup of personal-scoped entries over time
 ideas.md                   maybe-someday, dated
 tasks.md                   open checkboxes, dated
 attachments/               pasted images
@@ -33,6 +34,7 @@ config/profile.md          durable facts about you, fed to every pass
 **Scope and destination are independent.** Every entry gets a scope (`personal` or
 `work`) and a destination (`project`, `area`, `idea`, `task`, or day-only `note`).
 A personal project is just scope=personal + kind=project — no taxonomy collapse.
+Personal-scoped entries also appear in `personal.md` so you can read life stuff in one place.
 
 Plain Markdown with YAML frontmatter, so the vault is also a valid Obsidian vault.
 Point Obsidian at the same folder for graph view, backlinks, or hand-written notes
