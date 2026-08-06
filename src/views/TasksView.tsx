@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText } from "../api";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 
 type Props = {
   onError: (m: string) => void;
+  onNotice?: (m: string) => void;
 };
 
 type TaskLine = {
@@ -23,9 +25,10 @@ function parseTasks(md: string): TaskLine[] {
   return out;
 }
 
-export default function TasksView({ onError }: Props) {
+export default function TasksView({ onError, onNotice }: Props) {
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+  const menu = useContextMenu();
   const tasks = parseTasks(body);
   const open = tasks.filter((t) => !t.done);
   const done = tasks.filter((t) => t.done);
@@ -69,8 +72,56 @@ export default function TasksView({ onError }: Props) {
     }
   }
 
+  function taskMenu(t: TaskLine) {
+    return [
+      {
+        label: t.done ? "Mark open" : "Mark done",
+        onClick: () => void toggle(t.line),
+      },
+      {
+        label: "Copy text",
+        onClick: () => {
+          void copyText(t.text);
+          onNotice?.("Copied task");
+        },
+      },
+      { kind: "sep" as const },
+      {
+        label: "Edit markdown",
+        onClick: () => setEditing(body || "# Tasks\n\n"),
+      },
+      {
+        label: "Reveal in vault",
+        onClick: () => void api.revealPath("tasks.md").catch((e) => onError(errText(e))),
+      },
+    ];
+  }
+
   return (
-    <div className="detail" style={{ flex: 1 }}>
+    <div
+      className="detail"
+      style={{ flex: 1 }}
+      onContextMenu={(e) => {
+        if ((e.target as HTMLElement).closest("li, textarea, .ctxmenu")) return;
+        menu.open(e, [
+          {
+            label: "Edit markdown",
+            onClick: () => setEditing(body || "# Tasks\n\n"),
+          },
+          {
+            label: "Copy all",
+            onClick: () => {
+              void copyText(body);
+              onNotice?.("Copied tasks");
+            },
+          },
+          {
+            label: "Reveal in vault",
+            onClick: () => void api.revealPath("tasks.md").catch((err) => onError(errText(err))),
+          },
+        ]);
+      }}
+    >
       <div className="toolbar">
         <div className="dim tiny">Tasks</div>
         <div className="grow" />
@@ -104,6 +155,11 @@ export default function TasksView({ onError }: Props) {
               Tasks appear from triage, or Edit markdown and add{" "}
               <span className="mono">- [ ] …</span> checkboxes yourself.
             </p>
+            <p className="dim" style={{ marginTop: 16 }}>
+              <button className="btn" onClick={() => setEditing("# Tasks\n\n- [ ] ")}>
+                Add a task
+              </button>
+            </p>
           </div>
         ) : (
           <>
@@ -112,7 +168,10 @@ export default function TasksView({ onError }: Props) {
                 <h3 className="section-label">Open ({open.length})</h3>
                 <ul className="tasklist">
                   {open.map((t) => (
-                    <li key={t.line}>
+                    <li
+                      key={t.line}
+                      onContextMenu={(e) => menu.open(e, taskMenu(t))}
+                    >
                       <label>
                         <input type="checkbox" checked={false} onChange={() => toggle(t.line)} />
                         <span>{t.text}</span>
@@ -127,7 +186,10 @@ export default function TasksView({ onError }: Props) {
                 <h3 className="section-label dim">Done ({done.length})</h3>
                 <ul className="tasklist done">
                   {done.map((t) => (
-                    <li key={t.line}>
+                    <li
+                      key={t.line}
+                      onContextMenu={(e) => menu.open(e, taskMenu(t))}
+                    >
                       <label>
                         <input type="checkbox" checked onChange={() => toggle(t.line)} />
                         <span>{t.text}</span>
@@ -140,6 +202,7 @@ export default function TasksView({ onError }: Props) {
           </>
         )}
       </div>
+      <ContextMenu {...menu.menuProps} />
     </div>
   );
 }

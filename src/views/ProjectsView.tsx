@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type ProjectEntry, type ProjectMeta } from "../api";
+import ConfirmDialog from "../ConfirmDialog";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
 
 export default function ProjectsView({
   vaultPath,
   onError,
+  onNotice,
 }: {
   vaultPath: string;
   onError: (m: string) => void;
+  onNotice?: (m: string) => void;
 }) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -21,6 +25,10 @@ export default function ProjectsView({
   const [filter, setFilter] = useState<"all" | "project" | "area" | "personal" | "work">(
     "all"
   );
+  const [confirmDelete, setConfirmDelete] = useState<{ kind: string; slug: string; name: string } | null>(
+    null
+  );
+  const menu = useContextMenu();
 
   const refreshList = useCallback(async () => {
     try {
@@ -64,14 +72,18 @@ export default function ProjectsView({
     }
   }
 
-  async function refreshOverview() {
-    if (!selected) return;
-    const [kind, slug] = selected.split(":");
+  async function refreshOverview(kind?: string, slug?: string) {
+    const key = selected;
+    const k = kind ?? key?.split(":")[0];
+    const s = slug ?? key?.split(":")[1];
+    if (!k || !s) return;
     setBusy(true);
     try {
-      const next = await api.refreshEntityOverview(kind, slug);
-      setBody(next);
-      if (editing !== null) setEditing(next);
+      const next = await api.refreshEntityOverview(k, s);
+      if (selected === `${k}:${s}`) {
+        setBody(next);
+        if (editing !== null) setEditing(next);
+      }
     } catch (e) {
       onError(errText(e));
     } finally {
@@ -92,14 +104,112 @@ export default function ProjectsView({
     }
   }
 
-  function onListContextMenu(e: React.MouseEvent) {
-    e.preventDefault();
-    setCreating(true);
+  async function doDelete() {
+    if (!confirmDelete) return;
+    const { kind, slug } = confirmDelete;
+    try {
+      await api.deleteEntity(kind, slug);
+      setConfirmDelete(null);
+      if (selected === `${kind}:${slug}`) {
+        setSelected(null);
+        setBody("");
+      }
+      await refreshList();
+    } catch (e) {
+      onError(errText(e));
+    }
+  }
+
+  function relPath(kind: string, slug: string) {
+    return `${kind === "area" ? "areas" : "projects"}/${slug}.md`;
+  }
+
+  function projectMenu(p: ProjectEntry) {
+    const key = `${p.kind}:${p.slug}`;
+    return [
+      {
+        label: "Open",
+        onClick: () => setSelected(key),
+      },
+      {
+        label: "Edit",
+        onClick: () => {
+          setSelected(key);
+          api
+            .readEntity(p.kind, p.slug)
+            .then((t) => setEditing(t))
+            .catch((e) => onError(errText(e)));
+        },
+      },
+      {
+        label: "Refresh summary",
+        disabled: busy,
+        onClick: () => {
+          setSelected(key);
+          void refreshOverview(p.kind, p.slug);
+        },
+      },
+      { kind: "sep" as const },
+      {
+        label: "Copy name",
+        onClick: () => {
+          void copyText(p.name);
+          onNotice?.("Copied name");
+        },
+      },
+      {
+        label: "Copy path",
+        onClick: () => {
+          void copyText(relPath(p.kind, p.slug));
+          onNotice?.("Copied path");
+        },
+      },
+      {
+        label: "Reveal in vault",
+        onClick: () =>
+          void api.revealPath(relPath(p.kind, p.slug)).catch((e) => onError(errText(e))),
+      },
+      { kind: "sep" as const },
+      {
+        label: "New project / area…",
+        onClick: () => {
+          setNewKind(p.kind === "area" ? "area" : "project");
+          setNewScope(p.scope === "work" ? "work" : "personal");
+          setCreating(true);
+        },
+      },
+      {
+        label: `Delete ${p.kind}`,
+        danger: true,
+        onClick: () => setConfirmDelete({ kind: p.kind, slug: p.slug, name: p.name }),
+      },
+    ];
   }
 
   return (
     <div className="split">
-      <div className="list" onContextMenu={onListContextMenu}>
+      <div
+        className="list"
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest(".listitem")) return;
+          menu.open(e, [
+            {
+              label: "New project…",
+              onClick: () => {
+                setNewKind("project");
+                setCreating(true);
+              },
+            },
+            {
+              label: "New area…",
+              onClick: () => {
+                setNewKind("area");
+                setCreating(true);
+              },
+            },
+          ]);
+        }}
+      >
         <div className="list-head filters">
           {(["all", "project", "area", "work", "personal"] as const).map((f) => (
             <button
@@ -165,11 +275,8 @@ export default function ProjectsView({
               className={`listitem ${selected === key ? "active" : ""}`}
               onClick={() => setSelected(key)}
               onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setCreating(true);
-                setNewKind(p.kind === "area" ? "area" : "project");
-                setNewScope(p.scope === "work" ? "work" : "personal");
+                setSelected(key);
+                menu.open(e, projectMenu(p));
               }}
             >
               <div className="row">
@@ -203,7 +310,7 @@ export default function ProjectsView({
               <div className="grow" />
               {editing === null ? (
                 <>
-                  <button className="btn" onClick={refreshOverview} disabled={busy}>
+                  <button className="btn" onClick={() => refreshOverview()} disabled={busy}>
                     {busy ? "Refreshing…" : "Refresh summary"}
                   </button>
                   <button className="btn" onClick={() => setEditing(body)}>
@@ -228,9 +335,70 @@ export default function ProjectsView({
                   value={editing}
                   onChange={(e) => setEditing(e.target.value)}
                   spellCheck={false}
+                  onContextMenu={(e) => {
+                    const [kind, slug] = selected.split(":");
+                    menu.open(e, [
+                      {
+                        label: "Save",
+                        onClick: () => void save(),
+                      },
+                      {
+                        label: "Cancel edit",
+                        onClick: () => setEditing(null),
+                      },
+                      { kind: "sep" },
+                      {
+                        label: "Reveal in vault",
+                        onClick: () =>
+                          void api
+                            .revealPath(relPath(kind, slug))
+                            .catch((err) => onError(errText(err))),
+                      },
+                    ]);
+                  }}
                 />
               ) : (
-                <Markdown text={body} vaultPath={vaultPath} />
+                <Markdown
+                  text={body}
+                  vaultPath={vaultPath}
+                  onEdit={() => setEditing(body)}
+                  extraMenu={
+                    selected
+                      ? [
+                          {
+                            label: "Refresh summary",
+                            disabled: busy,
+                            onClick: () => void refreshOverview(),
+                          },
+                          {
+                            label: "Reveal in vault",
+                            onClick: () => {
+                              const [kind, slug] = selected.split(":");
+                              void api
+                                .revealPath(relPath(kind, slug))
+                                .catch((e) => onError(errText(e)));
+                            },
+                          },
+                          { kind: "sep" },
+                          {
+                            label: "Delete",
+                            danger: true,
+                            onClick: () => {
+                              const [kind, slug] = selected.split(":");
+                              const p = projects.find(
+                                (x) => x.kind === kind && x.slug === slug
+                              );
+                              setConfirmDelete({
+                                kind,
+                                slug,
+                                name: p?.name ?? slug,
+                              });
+                            },
+                          },
+                        ]
+                      : undefined
+                  }
+                />
               )}
             </div>
           </>
@@ -241,9 +409,25 @@ export default function ProjectsView({
               Pick one from the list, or create a new project/area. Each page has a standing
               Overview plus a dated activity log.
             </p>
+            <p className="dim" style={{ marginTop: 16 }}>
+              <button className="btn primary" onClick={() => setCreating(true)}>
+                New project / area
+              </button>
+            </p>
           </div>
         )}
       </div>
+
+      <ContextMenu {...menu.menuProps} />
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title={`Delete ${confirmDelete?.kind ?? ""}?`}
+        body={`Remove “${confirmDelete?.name ?? ""}” and drop it from projects.json. Dated history in other notes is left alone.`}
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => void doDelete()}
+      />
     </div>
   );
 }

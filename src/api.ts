@@ -110,6 +110,8 @@ export const api = {
     invoke<void>("write_entity", { kind, slug, content }),
   createEntity: (kind: string, name: string, scope: string) =>
     invoke<ProjectMeta>("create_entity", { kind, name, scope }),
+  deleteEntity: (kind: string, slug: string) =>
+    invoke<void>("delete_entity", { kind, slug }),
   refreshEntityOverview: (kind: string, slug: string) =>
     invoke<string>("refresh_entity_overview", { kind, slug }),
   refreshPersonalOverview: () => invoke<string>("refresh_personal_overview"),
@@ -126,6 +128,7 @@ export const api = {
   saveProfile: (text: string) => invoke<void>("save_profile", { text }),
 
   revealVault: () => invoke<void>("reveal_vault"),
+  revealPath: (rel: string) => invoke<void>("reveal_path", { rel }),
   readTasks: () => invoke<string>("read_tasks"),
   readIdeas: () => invoke<string>("read_ideas"),
   readPersonal: () => invoke<string>("read_personal"),
@@ -137,7 +140,9 @@ export const api = {
     invoke<string>("read_history_item", { date, id }),
   toggleTaskLine: (line: number) => invoke<string>("toggle_task_line", { line }),
   processInbox: (date?: string) =>
-    invoke<InboxProcessResult>("process_inbox", { date: date ?? null }),
+    invoke<InboxProcessResult>("process_inbox", { date: date ?? null, id: null }),
+  processInboxItem: (id: string) =>
+    invoke<InboxProcessResult>("process_inbox_item", { id }),
   processDay: (date: string) => invoke<InboxProcessResult>("process_day", { date }),
 };
 

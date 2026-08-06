@@ -5,19 +5,29 @@ import {
   type InboxItem,
   type InboxProcessResult,
 } from "../api";
+import ConfirmDialog from "../ConfirmDialog";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
 
 type Props = {
   vaultPath: string;
   onChanged: () => void;
   onError: (msg: string) => void;
+  onNotice?: (msg: string) => void;
 };
 
-export default function InboxView({ vaultPath, onChanged, onError }: Props) {
+export default function InboxView({
+  vaultPath,
+  onChanged,
+  onError,
+  onNotice,
+}: Props) {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<InboxProcessResult | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
+  const menu = useContextMenu();
 
   const refresh = useCallback(async () => {
     try {
@@ -59,14 +69,65 @@ export default function InboxView({ vaultPath, onChanged, onError }: Props) {
     }
   }
 
+  async function processOne(id: string) {
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await api.processInboxItem(id);
+      setResult(r);
+      await refresh();
+      onChanged();
+    } catch (e) {
+      onError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function discard(id: string) {
     try {
       await api.deleteInboxItem(id);
+      setConfirmDiscard(null);
       await refresh();
       onChanged();
     } catch (e) {
       onError(errText(e));
     }
+  }
+
+  function itemMenu(item: InboxItem) {
+    return [
+      {
+        label: "Process this item",
+        disabled: busy,
+        onClick: () => void processOne(item.id),
+      },
+      {
+        label: "Copy text",
+        onClick: () => {
+          void copyText(item.text);
+          onNotice?.("Copied capture text");
+        },
+      },
+      {
+        label: "Copy id",
+        onClick: () => {
+          void copyText(item.id);
+          onNotice?.("Copied id");
+        },
+      },
+      { kind: "sep" as const },
+      {
+        label: "Reveal in vault",
+        onClick: () =>
+          void api.revealPath(`inbox/${item.id}.md`).catch((e) => onError(errText(e))),
+      },
+      {
+        label: "Discard",
+        danger: true,
+        onClick: () => setConfirmDiscard(item.id),
+      },
+    ];
   }
 
   if (!items.length && !result) {
@@ -78,17 +139,36 @@ export default function InboxView({ vaultPath, onChanged, onError }: Props) {
           <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>, dump a thought, then
           process when you want them filed.
         </p>
+        <p className="dim" style={{ marginTop: 16 }}>
+          <button className="btn primary" onClick={() => api.showCapture()}>
+            New entry
+          </button>
+        </p>
       </div>
     );
   }
 
   return (
     <div className="split">
-      <div className="list">
+      <div
+        className="list"
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest(".listitem")) return;
+          menu.open(e, [
+            {
+              label: "Process inbox",
+              disabled: busy || items.length === 0,
+              onClick: () => void processAll(),
+            },
+            {
+              label: "New entry",
+              onClick: () => void api.showCapture(),
+            },
+          ]);
+        }}
+      >
         <div className="list-head">
-          <span className="dim tiny">
-            {items.length} pending
-          </span>
+          <span className="dim tiny">{items.length} pending</span>
           <button
             className="btn primary"
             onClick={processAll}
@@ -102,6 +182,10 @@ export default function InboxView({ vaultPath, onChanged, onError }: Props) {
             key={item.id}
             className={`listitem ${selected === item.id ? "active" : ""}`}
             onClick={() => setSelected(item.id)}
+            onContextMenu={(e) => {
+              setSelected(item.id);
+              menu.open(e, itemMenu(item));
+            }}
           >
             <div className="row">
               <span className="mono">
@@ -137,9 +221,7 @@ export default function InboxView({ vaultPath, onChanged, onError }: Props) {
                 New:{" "}
                 <strong>
                   {[
-                    ...new Set(
-                      result.processed.flatMap((p) => p.new_entities)
-                    ),
+                    ...new Set(result.processed.flatMap((p) => p.new_entities)),
                   ].join(", ")}
                 </strong>
                 .
@@ -162,12 +244,23 @@ export default function InboxView({ vaultPath, onChanged, onError }: Props) {
                 {current.date} {current.time} · {current.id}
               </div>
               <div className="grow" />
-              <button className="btn" onClick={() => discard(current.id)}>
+              <button
+                className="btn primary"
+                onClick={() => processOne(current.id)}
+                disabled={busy}
+              >
+                {busy ? "Processing…" : "Process"}
+              </button>
+              <button className="btn danger" onClick={() => setConfirmDiscard(current.id)}>
                 Discard
               </button>
             </div>
             <div className="content">
-              <Markdown text={current.text} vaultPath={vaultPath} />
+              <Markdown
+                text={current.text}
+                vaultPath={vaultPath}
+                extraMenu={itemMenu(current)}
+              />
             </div>
           </>
         ) : (
@@ -180,6 +273,17 @@ export default function InboxView({ vaultPath, onChanged, onError }: Props) {
           )
         )}
       </div>
+
+      <ContextMenu {...menu.menuProps} />
+      <ConfirmDialog
+        open={!!confirmDiscard}
+        title="Discard capture?"
+        body="This removes the inbox item permanently. It will not be filed into raw or day notes."
+        confirmLabel="Discard"
+        danger
+        onCancel={() => setConfirmDiscard(null)}
+        onConfirm={() => confirmDiscard && void discard(confirmDiscard)}
+      />
     </div>
   );
 }

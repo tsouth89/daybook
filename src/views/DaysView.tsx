@@ -6,16 +6,28 @@ import {
   type DayEntry,
   type InboxProcessResult,
 } from "../api";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
 
 type Props = {
   days: DayEntry[];
   vaultPath: string;
+  focusDate?: string | null;
+  onFocusConsumed?: () => void;
   onChanged: () => void;
   onError: (msg: string) => void;
+  onNotice?: (msg: string) => void;
 };
 
-export default function DaysView({ days, vaultPath, onChanged, onError }: Props) {
+export default function DaysView({
+  days,
+  vaultPath,
+  focusDate,
+  onFocusConsumed,
+  onChanged,
+  onError,
+  onNotice,
+}: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<DayContent | null>(null);
   const [pane, setPane] = useState<"note" | "raw">("note");
@@ -23,10 +35,17 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
   const [result, setResult] = useState<InboxProcessResult | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
+  const menu = useContextMenu();
 
   useEffect(() => {
     if (!selected && days.length) setSelected(days[0].date);
   }, [days, selected]);
+
+  useEffect(() => {
+    if (!focusDate) return;
+    setSelected(focusDate);
+    onFocusConsumed?.();
+  }, [focusDate, onFocusConsumed]);
 
   useEffect(() => {
     if (!selected) return;
@@ -45,16 +64,19 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
       .catch(() => setPending(0));
   }, [selected, onError]);
 
-  async function process() {
-    if (!selected) return;
+  async function process(date?: string) {
+    const d = date ?? selected;
+    if (!d) return;
     setBusy(true);
     setResult(null);
     try {
-      const r = await api.processDay(selected);
+      const r = await api.processDay(d);
       setResult(r);
-      setContent(await api.readDay(selected));
-      setPane("note");
-      setPending(0);
+      if (selected === d) {
+        setContent(await api.readDay(d));
+        setPane("note");
+        setPending(0);
+      }
       onChanged();
     } catch (e) {
       onError(errText(e));
@@ -87,6 +109,55 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
     }
   }
 
+  function dayMenu(d: DayEntry) {
+    return [
+      {
+        label: "Open",
+        onClick: () => setSelected(d.date),
+      },
+      {
+        label: "Edit note",
+        onClick: () => {
+          setSelected(d.date);
+          api
+            .readDay(d.date)
+            .then((c) => {
+              setContent(c);
+              setPane("note");
+              setEditing(c.note || "");
+            })
+            .catch((e) => onError(errText(e)));
+        },
+      },
+      {
+        label: "Process day’s inbox",
+        disabled: busy,
+        onClick: () => {
+          setSelected(d.date);
+          void process(d.date);
+        },
+      },
+      { kind: "sep" as const },
+      {
+        label: "Copy date",
+        onClick: () => {
+          void copyText(d.date);
+          onNotice?.("Copied date");
+        },
+      },
+      {
+        label: "Reveal day note",
+        onClick: () =>
+          void api.revealPath(`days/${d.date}.md`).catch((e) => onError(errText(e))),
+      },
+      {
+        label: "Reveal raw archive",
+        onClick: () =>
+          void api.revealPath(`raw/${d.date}.md`).catch((e) => onError(errText(e))),
+      },
+    ];
+  }
+
   if (!days.length) {
     return (
       <div className="empty">
@@ -94,6 +165,11 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
         <p className="dim">
           Capture something into the inbox, then process it. Days appear here once
           anything has been filed.
+        </p>
+        <p className="dim" style={{ marginTop: 16 }}>
+          <button className="btn primary" onClick={() => api.showCapture()}>
+            New entry
+          </button>
         </p>
       </div>
     );
@@ -107,6 +183,10 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
             key={d.date}
             className={`listitem ${selected === d.date ? "active" : ""}`}
             onClick={() => setSelected(d.date)}
+            onContextMenu={(e) => {
+              setSelected(d.date);
+              menu.open(e, dayMenu(d));
+            }}
           >
             <div className="row">
               <span className="mono">{d.date}</span>
@@ -169,7 +249,7 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
               )}
               <button
                 className="btn primary"
-                onClick={process}
+                onClick={() => process()}
                 disabled={busy || pending === 0 || editing !== null}
                 title={
                   pending === 0
@@ -204,14 +284,66 @@ export default function DaysView({ days, vaultPath, onChanged, onError }: Props)
                   spellCheck={false}
                 />
               ) : pane === "note" ? (
-                <Markdown text={content.note} vaultPath={vaultPath} />
+                <Markdown
+                  text={content.note}
+                  vaultPath={vaultPath}
+                  onEdit={() => setEditing(content.note || "")}
+                  extraMenu={
+                    selected
+                      ? [
+                          {
+                            label: "Reveal day note",
+                            onClick: () =>
+                              void api
+                                .revealPath(`days/${selected}.md`)
+                                .catch((e) => onError(errText(e))),
+                          },
+                          {
+                            label: "Copy date",
+                            onClick: () => {
+                              void copyText(selected);
+                              onNotice?.("Copied date");
+                            },
+                          },
+                        ]
+                      : undefined
+                  }
+                />
               ) : (
-                <pre className="raw">{content.raw || "Nothing archived on this day."}</pre>
+                <pre
+                  className="raw"
+                  onContextMenu={(e) => {
+                    menu.open(e, [
+                      {
+                        label: "Copy all",
+                        onClick: () => {
+                          void copyText(content.raw);
+                          onNotice?.("Copied raw");
+                        },
+                      },
+                      {
+                        label: "Edit raw",
+                        onClick: () => setEditing(content.raw),
+                      },
+                      {
+                        label: "Reveal raw archive",
+                        onClick: () =>
+                          selected &&
+                          void api
+                            .revealPath(`raw/${selected}.md`)
+                            .catch((err) => onError(errText(err))),
+                      },
+                    ]);
+                  }}
+                >
+                  {content.raw || "Nothing archived on this day."}
+                </pre>
               )}
             </div>
           </>
         )}
       </div>
+      <ContextMenu {...menu.menuProps} />
     </div>
   );
 }

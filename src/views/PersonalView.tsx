@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText } from "../api";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
 
 type Props = {
   vaultPath: string;
   onError: (m: string) => void;
+  onNotice?: (m: string) => void;
 };
 
-export default function PersonalView({ vaultPath, onError }: Props) {
+export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const menu = useContextMenu();
 
   const refresh = useCallback(async () => {
     try {
@@ -61,8 +64,39 @@ export default function PersonalView({ vaultPath, onError }: Props) {
     return t.startsWith("## ") || t.startsWith("### ");
   });
 
+  const pageMenu = [
+    {
+      label: "Edit",
+      onClick: () => setEditing(body || "# Personal\n\n"),
+    },
+    {
+      label: "Refresh summary",
+      disabled: busy,
+      onClick: () => void refreshOverview(),
+    },
+    { kind: "sep" as const },
+    {
+      label: "Copy all",
+      onClick: () => {
+        void copyText(body);
+        onNotice?.("Copied personal page");
+      },
+    },
+    {
+      label: "Reveal in vault",
+      onClick: () => void api.revealPath("personal.md").catch((e) => onError(errText(e))),
+    },
+  ];
+
   return (
-    <div className="detail" style={{ flex: 1 }}>
+    <div
+      className="detail"
+      style={{ flex: 1 }}
+      onContextMenu={(e) => {
+        if ((e.target as HTMLElement).closest(".md, textarea, .ctxmenu")) return;
+        menu.open(e, pageMenu);
+      }}
+    >
       <div className="toolbar">
         <div className="dim tiny">Personal rollup</div>
         <div className="grow" />
@@ -95,7 +129,12 @@ export default function PersonalView({ vaultPath, onError }: Props) {
             spellCheck={false}
           />
         ) : hasContent ? (
-          <Markdown text={body} vaultPath={vaultPath} />
+          <Markdown
+            text={body}
+            vaultPath={vaultPath}
+            onEdit={() => setEditing(body)}
+            extraMenu={pageMenu.filter((i) => i.kind === "sep" || i.label !== "Edit")}
+          />
         ) : (
           <div className="empty" style={{ padding: 0 }}>
             <h2>No personal entries yet</h2>
@@ -103,9 +142,15 @@ export default function PersonalView({ vaultPath, onError }: Props) {
               When triage marks something as personal it shows up here. You can also Edit and write
               notes directly.
             </p>
+            <p className="dim" style={{ marginTop: 16 }}>
+              <button className="btn" onClick={() => setEditing("# Personal\n\n")}>
+                Start writing
+              </button>
+            </p>
           </div>
         )}
       </div>
+      <ContextMenu {...menu.menuProps} />
     </div>
   );
 }

@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type HistoryItem } from "../api";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
 
 type Props = {
   vaultPath: string;
   onError: (m: string) => void;
+  onNotice?: (m: string) => void;
+  onOpenDay?: (date: string) => void;
 };
 
-export default function HistoryView({ vaultPath, onError }: Props) {
+export default function HistoryView({
+  vaultPath,
+  onError,
+  onNotice,
+  onOpenDay,
+}: Props) {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [body, setBody] = useState("");
+  const menu = useContextMenu();
 
   const refresh = useCallback(async () => {
     try {
@@ -48,6 +57,50 @@ export default function HistoryView({ vaultPath, onError }: Props) {
       .catch((e) => onError(errText(e)));
   }, [selected, items, onError]);
 
+  function historyMenu(item: HistoryItem) {
+    return [
+      {
+        label: "Open",
+        onClick: () => setSelected(keyOf(item)),
+      },
+      {
+        label: "Open day",
+        disabled: !onOpenDay,
+        onClick: () => onOpenDay?.(item.date),
+      },
+      { kind: "sep" as const },
+      {
+        label: "Copy text",
+        onClick: () => {
+          void (async () => {
+            try {
+              const t =
+                selected === keyOf(item)
+                  ? body
+                  : await api.readHistoryItem(item.date, item.id);
+              await copyText(t);
+              onNotice?.("Copied capture");
+            } catch (e) {
+              onError(errText(e));
+            }
+          })();
+        },
+      },
+      {
+        label: "Copy date",
+        onClick: () => {
+          void copyText(item.date);
+          onNotice?.("Copied date");
+        },
+      },
+      {
+        label: "Reveal raw archive",
+        onClick: () =>
+          void api.revealPath(`raw/${item.date}.md`).catch((e) => onError(errText(e))),
+      },
+    ];
+  }
+
   if (!items.length) {
     return (
       <div className="empty">
@@ -72,6 +125,10 @@ export default function HistoryView({ vaultPath, onError }: Props) {
               key={k}
               className={`listitem ${selected === k ? "active" : ""}`}
               onClick={() => setSelected(k)}
+              onContextMenu={(e) => {
+                setSelected(k);
+                menu.open(e, historyMenu(item));
+              }}
             >
               <div className="row">
                 <span className="mono">
@@ -95,14 +152,24 @@ export default function HistoryView({ vaultPath, onError }: Props) {
                 {current.id ? ` · ${current.id}` : ""}
               </div>
               <div className="grow" />
+              {onOpenDay && (
+                <button className="btn" onClick={() => onOpenDay(current.date)}>
+                  Open day
+                </button>
+              )}
               <span className="dim tiny">{current.chars} chars</span>
             </div>
             <div className="content">
-              <Markdown text={body} vaultPath={vaultPath} />
+              <Markdown
+                text={body}
+                vaultPath={vaultPath}
+                extraMenu={historyMenu(current)}
+              />
             </div>
           </>
         )}
       </div>
+      <ContextMenu {...menu.menuProps} />
     </div>
   );
 }

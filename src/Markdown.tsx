@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { api } from "./api";
+import { ContextMenu, copyText, useContextMenu, type MenuItem } from "./ContextMenu";
 
 type Props = {
   text: string;
   /** Vault root — kept for API compatibility; images load via Tauri command. */
   vaultPath?: string;
+  /** Extra menu items after Copy (e.g. Edit). */
+  extraMenu?: MenuItem[];
+  onEdit?: () => void;
 };
 
 function collectAttachmentSrcs(html: string): string[] {
@@ -30,7 +34,6 @@ async function resolveVaultImages(html: string): Promise<string> {
   for (const rel of refs) {
     try {
       const dataUrl = await api.attachmentDataUrl(rel);
-      // Replace every src that points at this relative path.
       out = out.replace(
         new RegExp(`src="${rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`, "g"),
         `src="${dataUrl}"`
@@ -40,7 +43,7 @@ async function resolveVaultImages(html: string): Promise<string> {
         `src="${dataUrl}"`
       );
     } catch {
-      /* leave broken src — better than crashing the note view */
+      /* leave broken src */
     }
   }
   return out;
@@ -51,8 +54,9 @@ async function resolveVaultImages(html: string): Promise<string> {
  * picked up, so sanitise before injecting rather than trusting the source.
  * Vault images are loaded as data URLs so they work without asset-protocol scope fights.
  */
-export default function Markdown({ text }: Props) {
+export default function Markdown({ text, extraMenu, onEdit }: Props) {
   const [html, setHtml] = useState("");
+  const menu = useContextMenu();
 
   useEffect(() => {
     let cancelled = false;
@@ -68,5 +72,35 @@ export default function Markdown({ text }: Props) {
 
   if (!text.trim()) return <p className="dim">Nothing here yet.</p>;
   if (!html) return <p className="dim">…</p>;
-  return <div className="md" dangerouslySetInnerHTML={{ __html: html }} />;
+
+  return (
+    <>
+      <div
+        className="md"
+        dangerouslySetInnerHTML={{ __html: html }}
+        onContextMenu={(e) => {
+          const sel = window.getSelection()?.toString() ?? "";
+          const items: MenuItem[] = [
+            {
+              label: "Copy selection",
+              disabled: !sel.trim(),
+              onClick: () => void copyText(sel),
+            },
+            {
+              label: "Copy all",
+              onClick: () => void copyText(text),
+            },
+          ];
+          if (onEdit) {
+            items.push({ kind: "sep" }, { label: "Edit", onClick: onEdit });
+          }
+          if (extraMenu?.length) {
+            items.push({ kind: "sep" }, ...extraMenu);
+          }
+          menu.open(e, items);
+        }}
+      />
+      <ContextMenu {...menu.menuProps} />
+    </>
+  );
 }

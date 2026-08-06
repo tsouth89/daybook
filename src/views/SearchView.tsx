@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 import { api, errText, type SearchHit } from "../api";
+import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 
-export default function SearchView({ onError }: { onError: (m: string) => void }) {
+export default function SearchView({
+  onError,
+  onNotice,
+}: {
+  onError: (m: string) => void;
+  onNotice?: (m: string) => void;
+}) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [ran, setRan] = useState(false);
+  const menu = useContextMenu();
 
-  // Debounced so every keystroke doesn't walk the whole vault.
   useEffect(() => {
     if (!query.trim()) {
       setHits([]);
@@ -48,16 +55,62 @@ export default function SearchView({ onError }: { onError: (m: string) => void }
       )}
       <div className="content">
         {Object.entries(grouped).map(([path, group]) => (
-          <div key={path} className="hitgroup">
+          <div
+            key={path}
+            className="hitgroup"
+            onContextMenu={(e) => {
+              if ((e.target as HTMLElement).closest(".hit")) return;
+              menu.open(e, [
+                {
+                  label: "Copy path",
+                  onClick: () => {
+                    void copyText(path);
+                    onNotice?.("Copied path");
+                  },
+                },
+                {
+                  label: "Reveal in vault",
+                  onClick: () => void api.revealPath(path).catch((err) => onError(errText(err))),
+                },
+              ]);
+            }}
+          >
             <div className="hitpath mono">{path}</div>
             {group.map((h, i) => (
-              <div key={i} className="hit">
+              <div
+                key={i}
+                className="hit"
+                onContextMenu={(e) =>
+                  menu.open(e, [
+                    {
+                      label: "Copy line",
+                      onClick: () => {
+                        void copyText(h.text);
+                        onNotice?.("Copied line");
+                      },
+                    },
+                    {
+                      label: "Copy path",
+                      onClick: () => {
+                        void copyText(path);
+                        onNotice?.("Copied path");
+                      },
+                    },
+                    {
+                      label: "Reveal in vault",
+                      onClick: () =>
+                        void api.revealPath(path).catch((err) => onError(errText(err))),
+                    },
+                  ])
+                }
+              >
                 <span className="dim mono tiny">{h.line}</span> {h.text}
               </div>
             ))}
           </div>
         ))}
       </div>
+      <ContextMenu {...menu.menuProps} />
     </div>
   );
 }

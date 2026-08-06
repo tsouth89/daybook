@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type DayEntry, type Settings } from "./api";
+import { ContextMenu, useContextMenu } from "./ContextMenu";
 import DaysView from "./views/DaysView";
 import HistoryView from "./views/HistoryView";
 import IdeasView from "./views/IdeasView";
@@ -38,6 +39,9 @@ export default function App() {
   const [days, setDays] = useState<DayEntry[]>([]);
   const [inboxCount, setInboxCount] = useState(0);
   const [banner, setBanner] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [focusDay, setFocusDay] = useState<string | null>(null);
+  const menu = useContextMenu();
 
   const refreshDays = useCallback(async () => {
     try {
@@ -71,12 +75,40 @@ export default function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshDays, refreshInbox]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 2200);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const needsKey = settings && !hasProviderKey(settings);
   const vaultPath = settings?.vault_path ?? "";
 
+  function flash(msg: string) {
+    setNotice(msg);
+  }
+
   return (
     <div className="shell">
-      <nav className="sidebar">
+      <nav
+        className="sidebar"
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest("button")) return;
+          menu.open(e, [
+            { label: "New entry", shortcut: "⌃⇧Space", onClick: () => void api.showCapture() },
+            { kind: "sep" },
+            { label: "Go to Inbox", onClick: () => setTab("inbox") },
+            { label: "Go to Days", onClick: () => setTab("days") },
+            { label: "Go to Projects", onClick: () => setTab("projects") },
+            { kind: "sep" },
+            {
+              label: "Open vault folder",
+              onClick: () => void api.revealVault().catch((err) => setBanner(errText(err))),
+            },
+            { label: "Settings", onClick: () => setTab("settings") },
+          ]);
+        }}
+      >
         <div className="brand">Daybook</div>
         <button className="btn primary capture-btn" onClick={() => api.showCapture()}>
           New entry
@@ -98,13 +130,44 @@ export default function App() {
             key={k}
             className={`navitem ${tab === k ? "active" : ""}`}
             onClick={() => setTab(k)}
+            onContextMenu={(e) =>
+              menu.open(e, [
+                { label: `Open ${label.replace(/\s*\(.*\)/, "")}`, onClick: () => setTab(k) },
+                { kind: "sep" },
+                {
+                  label: "New entry",
+                  onClick: () => void api.showCapture(),
+                },
+                {
+                  label: "Open vault folder",
+                  onClick: () => void api.revealVault().catch((err) => setBanner(errText(err))),
+                },
+              ])
+            }
           >
             {label}
           </button>
         ))}
         <div className="spacer" />
         {settings && (
-          <div className="vaultbox">
+          <div
+            className="vaultbox"
+            onContextMenu={(e) =>
+              menu.open(e, [
+                {
+                  label: "Copy vault path",
+                  onClick: () => {
+                    void navigator.clipboard.writeText(settings.vault_path);
+                    flash("Copied vault path");
+                  },
+                },
+                {
+                  label: "Open vault folder",
+                  onClick: () => void api.revealVault().catch((err) => setBanner(errText(err))),
+                },
+              ])
+            }
+          >
             <div className="dim tiny">Vault</div>
             <div className="tiny mono wrap">{settings.vault_path}</div>
             <button className="btn tiny-btn" onClick={() => api.revealVault()}>
@@ -120,6 +183,7 @@ export default function App() {
             {banner} <span className="dim">(click to dismiss)</span>
           </div>
         )}
+        {notice && !banner && <div className="banner ok">{notice}</div>}
         {needsKey && tab !== "settings" && (
           <div className="banner warn">
             No API key set for the current provider, so captures stay in the inbox until you add one.{" "}
@@ -137,30 +201,42 @@ export default function App() {
               refreshInbox();
             }}
             onError={setBanner}
+            onNotice={flash}
           />
         )}
         {tab === "days" && (
           <DaysView
             days={days}
             vaultPath={vaultPath}
+            focusDate={focusDay}
+            onFocusConsumed={() => setFocusDay(null)}
             onChanged={refreshDays}
             onError={setBanner}
+            onNotice={flash}
           />
         )}
         {tab === "personal" && (
-          <PersonalView vaultPath={vaultPath} onError={setBanner} />
+          <PersonalView vaultPath={vaultPath} onError={setBanner} onNotice={flash} />
         )}
         {tab === "projects" && (
-          <ProjectsView vaultPath={vaultPath} onError={setBanner} />
+          <ProjectsView vaultPath={vaultPath} onError={setBanner} onNotice={flash} />
         )}
-        {tab === "tasks" && <TasksView onError={setBanner} />}
+        {tab === "tasks" && <TasksView onError={setBanner} onNotice={flash} />}
         {tab === "ideas" && (
-          <IdeasView vaultPath={vaultPath} onError={setBanner} />
+          <IdeasView vaultPath={vaultPath} onError={setBanner} onNotice={flash} />
         )}
         {tab === "history" && (
-          <HistoryView vaultPath={vaultPath} onError={setBanner} />
+          <HistoryView
+            vaultPath={vaultPath}
+            onError={setBanner}
+            onNotice={flash}
+            onOpenDay={(date) => {
+              setFocusDay(date);
+              setTab("days");
+            }}
+          />
         )}
-        {tab === "search" && <SearchView onError={setBanner} />}
+        {tab === "search" && <SearchView onError={setBanner} onNotice={flash} />}
         {tab === "settings" && settings && (
           <SettingsView
             settings={settings}
@@ -173,6 +249,7 @@ export default function App() {
           />
         )}
       </main>
+      <ContextMenu {...menu.menuProps} />
     </div>
   );
 }

@@ -226,6 +226,41 @@ fn create_entity(
 }
 
 #[tauri::command]
+fn delete_entity(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+) -> CmdResult<()> {
+    vault::delete_entity(&state.settings().vault(), &kind, &slug).map_err(err)
+}
+
+/// Open a vault-relative path in the OS file manager (parent folder for files).
+#[tauri::command]
+fn reveal_path(
+    state: tauri::State<AppState>,
+    app: tauri::AppHandle,
+    rel: String,
+) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let v = state.settings().vault();
+    vault::ensure_vault(&v).map_err(err)?;
+    let path = vault::vault_abs(&v, &rel).map_err(err)?;
+    if !path.exists() {
+        return Err(format!("Path not found: {rel}"));
+    }
+    let target = if path.is_file() {
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or(path.clone())
+    } else {
+        path
+    };
+    app.opener()
+        .open_path(target.to_string_lossy().to_string(), None::<&str>)
+        .map_err(err)
+}
+
+#[tauri::command]
 async fn refresh_entity_overview(
     state: tauri::State<'_, AppState>,
     kind: String,
@@ -613,12 +648,13 @@ async fn refresh_touched_overviews(
     }
 }
 
-/// Drain the inbox. If `date` is set, only process items from that day.
+/// Drain the inbox. Optional `date` / `id` narrow which items run.
 /// Failed items stay in the inbox.
 #[tauri::command]
 async fn process_inbox(
     state: tauri::State<'_, AppState>,
     date: Option<String>,
+    id: Option<String>,
 ) -> CmdResult<InboxProcessResult> {
     let s = state.settings();
     let v = s.vault();
@@ -632,12 +668,17 @@ async fn process_inbox(
     let items: Vec<_> = items
         .into_iter()
         .filter(|i| date.as_ref().map(|d| d == &i.date).unwrap_or(true))
+        .filter(|i| id.as_ref().map(|x| x == &i.id).unwrap_or(true))
         .collect();
 
     if items.is_empty() {
         return Ok(InboxProcessResult {
             processed: vec![],
-            errors: vec!["Inbox is empty.".into()],
+            errors: vec![if id.is_some() {
+                "Inbox item not found.".into()
+            } else {
+                "Inbox is empty.".into()
+            }],
         });
     }
 
@@ -694,7 +735,15 @@ async fn process_inbox(
 /// Days UI already calls.
 #[tauri::command]
 async fn process_day(state: tauri::State<'_, AppState>, date: String) -> CmdResult<InboxProcessResult> {
-    process_inbox(state, Some(date)).await
+    process_inbox(state, Some(date), None).await
+}
+
+#[tauri::command]
+async fn process_inbox_item(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> CmdResult<InboxProcessResult> {
+    process_inbox(state, None, Some(id)).await
 }
 
 // -------------------------------------------------------------------- setup
@@ -821,6 +870,7 @@ pub fn run() {
             write_ideas,
             write_tasks,
             create_entity,
+            delete_entity,
             refresh_entity_overview,
             refresh_personal_overview,
             list_projects,
@@ -834,7 +884,9 @@ pub fn run() {
             get_profile,
             save_profile,
             reveal_vault,
+            reveal_path,
             process_inbox,
+            process_inbox_item,
             process_day,
         ])
         .run(tauri::generate_context!())

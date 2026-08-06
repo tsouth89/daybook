@@ -775,6 +775,33 @@ pub fn create_entity(
     Ok(meta)
 }
 
+/// Delete a project/area file and drop it from projects.json.
+pub fn delete_entity(v: &Path, kind: &str, slug: &str) -> Result<()> {
+    ensure_vault(v)?;
+    let kind = if kind == "area" { "area" } else { "project" };
+    let slug = slugify(slug);
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    }
+    let known: Vec<ProjectMeta> = read_projects_config(v)
+        .into_iter()
+        .filter(|p| p.slug != slug)
+        .collect();
+    write_projects_config(v, &known)?;
+    Ok(())
+}
+
+/// Absolute path for a vault-relative path like `projects/daybook.md`.
+pub fn vault_abs(v: &Path, rel: &str) -> Result<PathBuf> {
+    let rel = rel.trim().replace('\\', "/");
+    if rel.contains("..") {
+        anyhow::bail!("Invalid path");
+    }
+    Ok(v.join(rel))
+}
+
 #[derive(Debug, Serialize)]
 pub struct ProjectEntry {
     pub slug: String,
