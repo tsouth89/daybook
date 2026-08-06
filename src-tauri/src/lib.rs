@@ -102,6 +102,11 @@ fn save_attachment(
 }
 
 #[tauri::command]
+fn attachment_data_url(state: tauri::State<AppState>, rel: String) -> CmdResult<String> {
+    vault::attachment_data_url(&state.settings().vault(), &rel).map_err(err)
+}
+
+#[tauri::command]
 fn hide_capture(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("capture") {
         let _ = w.hide();
@@ -308,9 +313,17 @@ fn apply_triage(
         }
     }
 
+    // Write entity files. Attachments from the capture go on the first project/area only.
+    let mut attachments_placed = false;
     for (key, (kind, name, scope, body)) in &entity_bodies {
         let slug = key.split_once(':').map(|(_, s)| s).unwrap_or(key);
-        vault::upsert_entity_day(v, kind, slug, name, scope, &item.date, &item.id, body)
+        let body = if !attachments_placed {
+            attachments_placed = true;
+            vault::ensure_attachment_markdown(&item.text, body)
+        } else {
+            body.clone()
+        };
+        vault::upsert_entity_day(v, kind, slug, name, scope, &item.date, &item.id, &body)
             .map_err(err)?;
         destinations.push(format!("{kind}/{slug}"));
 
@@ -325,7 +338,6 @@ fn apply_triage(
                 description: String::new(),
             });
         } else if let Some(k) = known.iter_mut().find(|k| k.slug == *slug) {
-            // Fill in kind/scope if this was an old config entry.
             if k.kind.is_empty() {
                 k.kind = kind.clone();
             }
@@ -337,7 +349,10 @@ fn apply_triage(
 
     vault::append_raw_item(v, &item.date, Some(&item.id), &item.text).map_err(err)?;
 
-    let day_body = ai::render_day_item_body(&triage.entries);
+    let day_body = vault::ensure_attachment_markdown(
+        &item.text,
+        &ai::render_day_item_body(&triage.entries),
+    );
     let title = ai::primary_title(&triage.entries, &triage.summary);
     vault::upsert_day_item(
         v,
@@ -550,6 +565,7 @@ pub fn run() {
             list_inbox,
             delete_inbox_item,
             save_attachment,
+            attachment_data_url,
             hide_capture,
             show_capture,
             read_tasks,

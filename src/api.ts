@@ -82,6 +82,7 @@ export const api = {
   deleteInboxItem: (id: string) => invoke<void>("delete_inbox_item", { id }),
   saveAttachment: (dataBase64: string, ext: string) =>
     invoke<string>("save_attachment", { dataBase64, ext }),
+  attachmentDataUrl: (rel: string) => invoke<string>("attachment_data_url", { rel }),
   hideCapture: () => invoke<void>("hide_capture"),
   showCapture: () => invoke<void>("show_capture"),
 

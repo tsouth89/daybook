@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use base64::Engine;
 use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -829,6 +830,36 @@ pub fn attachment_mime(rel: &str) -> String {
         "webp" => "image/webp".into(),
         _ => "image/png".into(),
     }
+}
+
+/// If the model dropped image markdown while rewriting, put the refs back.
+pub fn ensure_attachment_markdown(original: &str, body: &str) -> String {
+    let refs = extract_attachment_refs(original);
+    if refs.is_empty() {
+        return body.to_string();
+    }
+    let mut out = body.trim_end().to_string();
+    for rel in refs {
+        if out.contains(&rel) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(&format!("![]({rel})"));
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+/// data:image/...;base64,... — reliable in the webview without asset protocol.
+pub fn attachment_data_url(v: &Path, rel: &str) -> Result<String> {
+    let bytes = read_attachment_bytes(v, rel)?;
+    let mime = attachment_mime(rel);
+    let b64 = Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    Ok(format!("data:{mime};base64,{b64}"))
 }
 
 // ----------------------------------------------------------- ideas / tasks read

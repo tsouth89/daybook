@@ -36,10 +36,10 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**", "$DOCUMENT/**", "$USERPROFILE/**"]
+        "scope": ["$HOME/**", "$DOCUMENT/**", "$USERPROFILE/**", "C:/Users/**/Journal/**"]
       }
     }
   },
