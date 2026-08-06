@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   api,
   errText,
@@ -6,13 +6,16 @@ import {
   type DayEntry,
   type InboxProcessResult,
 } from "../api";
+import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
+import NoteEditor from "../NoteEditor";
 
 type Props = {
   days: DayEntry[];
   vaultPath: string;
   focusDate?: string | null;
+  focusPane?: "note" | "raw" | null;
   onFocusConsumed?: () => void;
   onChanged: () => void;
   onError: (msg: string) => void;
@@ -23,6 +26,7 @@ export default function DaysView({
   days,
   vaultPath,
   focusDate,
+  focusPane,
   onFocusConsumed,
   onChanged,
   onError,
@@ -34,7 +38,10 @@ export default function DaysView({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<InboxProcessResult | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(0);
+  const [confirmRaw, setConfirmRaw] = useState(false);
+  const pendingPane = useRef<"note" | "raw" | null>(null);
   const menu = useContextMenu();
 
   useEffect(() => {
@@ -43,19 +50,23 @@ export default function DaysView({
 
   useEffect(() => {
     if (!focusDate) return;
+    if (focusPane) pendingPane.current = focusPane;
     setSelected(focusDate);
     onFocusConsumed?.();
-  }, [focusDate, onFocusConsumed]);
+  }, [focusDate, focusPane, onFocusConsumed]);
 
   useEffect(() => {
     if (!selected) return;
     setResult(null);
     setEditing(null);
+    setDirty(false);
     api
       .readDay(selected)
       .then((c) => {
         setContent(c);
-        setPane(c.note ? "note" : "raw");
+        const want = pendingPane.current;
+        pendingPane.current = null;
+        setPane(want ?? (c.note ? "note" : "raw"));
       })
       .catch((e) => onError(errText(e)));
     api
@@ -91,6 +102,8 @@ export default function DaysView({
       await api.writeRaw(selected, editing);
       setContent(await api.readDay(selected));
       setEditing(null);
+      setDirty(false);
+      onNotice?.("Saved raw (source of truth)");
       onChanged();
     } catch (e) {
       onError(errText(e));
@@ -103,10 +116,31 @@ export default function DaysView({
       await api.writeNote(selected, editing);
       setContent(await api.readDay(selected));
       setEditing(null);
+      setDirty(false);
+      onNotice?.("Saved");
       onChanged();
     } catch (e) {
       onError(errText(e));
     }
+  }
+
+  function startEditNote() {
+    if (!content) return;
+    setPane("note");
+    setEditing(content.note || `# ${selected}\n\n`);
+    setDirty(false);
+  }
+
+  function startEditRaw() {
+    setConfirmRaw(true);
+  }
+
+  function confirmStartRaw() {
+    if (!content) return;
+    setConfirmRaw(false);
+    setPane("raw");
+    setEditing(content.raw);
+    setDirty(false);
   }
 
   function dayMenu(d: DayEntry) {
@@ -124,7 +158,8 @@ export default function DaysView({
             .then((c) => {
               setContent(c);
               setPane("note");
-              setEditing(c.note || "");
+              setEditing(c.note || `# ${d.date}\n\n`);
+              setDirty(false);
             })
             .catch((e) => onError(errText(e)));
         },
@@ -163,8 +198,8 @@ export default function DaysView({
       <div className="empty">
         <h2>No days yet</h2>
         <p className="dim">
-          Capture something into the inbox, then process it. Days appear here once
-          anything has been filed.
+          Capture something into the inbox, then process it. Days appear here once anything has been
+          filed.
         </p>
         <p className="dim" style={{ marginTop: 16 }}>
           <button className="btn primary" onClick={() => api.showCapture()}>
@@ -209,8 +244,8 @@ export default function DaysView({
                   onClick={() => {
                     setPane("note");
                     setEditing(null);
+                    setDirty(false);
                   }}
-                  disabled={!content.note && editing === null}
                 >
                   Note
                 </button>
@@ -219,24 +254,30 @@ export default function DaysView({
                   onClick={() => {
                     setPane("raw");
                     setEditing(null);
+                    setDirty(false);
                   }}
                 >
                   Raw
                 </button>
               </div>
               <div className="grow" />
+              {dirty && <span className="dim tiny">Unsaved</span>}
               {editing === null ? (
                 <button
                   className="btn"
-                  onClick={() =>
-                    setEditing(pane === "note" ? content.note || "" : content.raw)
-                  }
+                  onClick={() => (pane === "note" ? startEditNote() : startEditRaw())}
                 >
                   Edit {pane}
                 </button>
               ) : (
                 <>
-                  <button className="btn" onClick={() => setEditing(null)}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setEditing(null);
+                      setDirty(false);
+                    }}
+                  >
                     Cancel
                   </button>
                   <button
@@ -269,46 +310,71 @@ export default function DaysView({
               <div className={`banner ${result.errors.length ? "warn" : "ok"}`}>
                 Filed {result.processed.length} capture
                 {result.processed.length === 1 ? "" : "s"} for {selected}.
-                {result.errors.length > 0 && (
-                  <> Failed: {result.errors.join(" · ")}</>
-                )}
+                {result.errors.length > 0 && <> Failed: {result.errors.join(" · ")}</>}
               </div>
             )}
 
-            <div className="content">
-              {editing !== null ? (
+            <div className={`content ${editing !== null && pane === "note" ? "has-editor" : ""}`}>
+              {editing !== null && pane === "note" ? (
+                <NoteEditor
+                  value={editing}
+                  onChange={(v) => {
+                    setEditing(v);
+                    setDirty(v !== (content.note || ""));
+                  }}
+                  vaultPath={vaultPath}
+                  onSave={() => void saveNote()}
+                />
+              ) : editing !== null && pane === "raw" ? (
                 <textarea
                   className="rawedit"
                   value={editing}
-                  onChange={(e) => setEditing(e.target.value)}
+                  onChange={(e) => {
+                    setEditing(e.target.value);
+                    setDirty(e.target.value !== content.raw);
+                  }}
                   spellCheck={false}
                 />
               ) : pane === "note" ? (
-                <Markdown
-                  text={content.note}
-                  vaultPath={vaultPath}
-                  onEdit={() => setEditing(content.note || "")}
-                  extraMenu={
-                    selected
-                      ? [
-                          {
-                            label: "Reveal day note",
-                            onClick: () =>
-                              void api
-                                .revealPath(`days/${selected}.md`)
-                                .catch((e) => onError(errText(e))),
-                          },
-                          {
-                            label: "Copy date",
-                            onClick: () => {
-                              void copyText(selected);
-                              onNotice?.("Copied date");
+                content.note ? (
+                  <Markdown
+                    text={content.note}
+                    vaultPath={vaultPath}
+                    onEdit={startEditNote}
+                    extraMenu={
+                      selected
+                        ? [
+                            {
+                              label: "Reveal day note",
+                              onClick: () =>
+                                void api
+                                  .revealPath(`days/${selected}.md`)
+                                  .catch((e) => onError(errText(e))),
                             },
-                          },
-                        ]
-                      : undefined
-                  }
-                />
+                            {
+                              label: "Copy date",
+                              onClick: () => {
+                                void copyText(selected);
+                                onNotice?.("Copied date");
+                              },
+                            },
+                          ]
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <div className="empty" style={{ padding: 0 }}>
+                    <h2>No day note yet</h2>
+                    <p className="dim">
+                      Process inbox items to generate one, or write a note yourself.
+                    </p>
+                    <p className="dim" style={{ marginTop: 16 }}>
+                      <button className="btn primary" onClick={startEditNote}>
+                        Write note
+                      </button>
+                    </p>
+                  </div>
+                )
               ) : (
                 <pre
                   className="raw"
@@ -322,8 +388,8 @@ export default function DaysView({
                         },
                       },
                       {
-                        label: "Edit raw",
-                        onClick: () => setEditing(content.raw),
+                        label: "Edit raw…",
+                        onClick: startEditRaw,
                       },
                       {
                         label: "Reveal raw archive",
@@ -344,6 +410,15 @@ export default function DaysView({
         )}
       </div>
       <ContextMenu {...menu.menuProps} />
+      <ConfirmDialog
+        open={confirmRaw}
+        title="Edit raw archive?"
+        body="Raw is the append-only source of truth. Overwriting it can destroy captures that day notes are rebuilt from. Prefer editing the Note pane unless you know what you’re doing."
+        confirmLabel="Edit raw anyway"
+        danger
+        onCancel={() => setConfirmRaw(false)}
+        onConfirm={confirmStartRaw}
+      />
     </div>
   );
 }

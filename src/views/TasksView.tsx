@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText } from "../api";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import NoteEditor from "../NoteEditor";
 
 type Props = {
   onError: (m: string) => void;
@@ -28,6 +29,7 @@ function parseTasks(md: string): TaskLine[] {
 export default function TasksView({ onError, onNotice }: Props) {
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const menu = useContextMenu();
   const tasks = parseTasks(body);
   const open = tasks.filter((t) => !t.done);
@@ -67,6 +69,8 @@ export default function TasksView({ onError, onNotice }: Props) {
       await api.writeTasks(editing);
       setBody(editing);
       setEditing(null);
+      setDirty(false);
+      onNotice?.("Saved");
     } catch (e) {
       onError(errText(e));
     }
@@ -88,7 +92,10 @@ export default function TasksView({ onError, onNotice }: Props) {
       { kind: "sep" as const },
       {
         label: "Edit markdown",
-        onClick: () => setEditing(body || "# Tasks\n\n"),
+        onClick: () => {
+          setEditing(body || "# Tasks\n\n");
+          setDirty(false);
+        },
       },
       {
         label: "Reveal in vault",
@@ -102,11 +109,14 @@ export default function TasksView({ onError, onNotice }: Props) {
       className="detail"
       style={{ flex: 1 }}
       onContextMenu={(e) => {
-        if ((e.target as HTMLElement).closest("li, textarea, .ctxmenu")) return;
+        if ((e.target as HTMLElement).closest("li, .cm-editor, .ctxmenu, .note-editor")) return;
         menu.open(e, [
           {
             label: "Edit markdown",
-            onClick: () => setEditing(body || "# Tasks\n\n"),
+            onClick: () => {
+              setEditing(body || "# Tasks\n\n");
+              setDirty(false);
+            },
           },
           {
             label: "Copy all",
@@ -123,15 +133,27 @@ export default function TasksView({ onError, onNotice }: Props) {
       }}
     >
       <div className="toolbar">
-        <div className="dim tiny">Tasks</div>
+        <div className="dim tiny">Tasks{dirty ? " · unsaved" : ""}</div>
         <div className="grow" />
         {editing === null ? (
-          <button className="btn" onClick={() => setEditing(body || "# Tasks\n\n")}>
+          <button
+            className="btn"
+            onClick={() => {
+              setEditing(body || "# Tasks\n\n");
+              setDirty(false);
+            }}
+          >
             Edit markdown
           </button>
         ) : (
           <>
-            <button className="btn" onClick={() => setEditing(null)}>
+            <button
+              className="btn"
+              onClick={() => {
+                setEditing(null);
+                setDirty(false);
+              }}
+            >
               Cancel
             </button>
             <button className="btn primary" onClick={save}>
@@ -140,13 +162,16 @@ export default function TasksView({ onError, onNotice }: Props) {
           </>
         )}
       </div>
-      <div className="content tasks-view">
+      <div className={`content tasks-view ${editing !== null ? "has-editor" : ""}`}>
         {editing !== null ? (
-          <textarea
-            className="rawedit"
+          <NoteEditor
             value={editing}
-            onChange={(e) => setEditing(e.target.value)}
-            spellCheck={false}
+            onChange={(v) => {
+              setEditing(v);
+              setDirty(v !== body);
+            }}
+            onSave={() => void save()}
+            initialMode="source"
           />
         ) : !tasks.length ? (
           <div className="empty" style={{ padding: 0 }}>
@@ -156,7 +181,13 @@ export default function TasksView({ onError, onNotice }: Props) {
               <span className="mono">- [ ] …</span> checkboxes yourself.
             </p>
             <p className="dim" style={{ marginTop: 16 }}>
-              <button className="btn" onClick={() => setEditing("# Tasks\n\n- [ ] ")}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setEditing("# Tasks\n\n- [ ] ");
+                  setDirty(false);
+                }}
+              >
                 Add a task
               </button>
             </p>
@@ -168,10 +199,7 @@ export default function TasksView({ onError, onNotice }: Props) {
                 <h3 className="section-label">Open ({open.length})</h3>
                 <ul className="tasklist">
                   {open.map((t) => (
-                    <li
-                      key={t.line}
-                      onContextMenu={(e) => menu.open(e, taskMenu(t))}
-                    >
+                    <li key={t.line} onContextMenu={(e) => menu.open(e, taskMenu(t))}>
                       <label>
                         <input type="checkbox" checked={false} onChange={() => toggle(t.line)} />
                         <span>{t.text}</span>
@@ -186,10 +214,7 @@ export default function TasksView({ onError, onNotice }: Props) {
                 <h3 className="section-label dim">Done ({done.length})</h3>
                 <ul className="tasklist done">
                   {done.map((t) => (
-                    <li
-                      key={t.line}
-                      onContextMenu={(e) => menu.open(e, taskMenu(t))}
-                    >
+                    <li key={t.line} onContextMenu={(e) => menu.open(e, taskMenu(t))}>
                       <label>
                         <input type="checkbox" checked onChange={() => toggle(t.line)} />
                         <span>{t.text}</span>

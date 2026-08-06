@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { api } from "./api";
 import { ContextMenu, copyText, useContextMenu, type MenuItem } from "./ContextMenu";
+import { expandWikiLinks, pathToNav, useNavigate } from "./nav";
 
 type Props = {
   text: string;
@@ -53,17 +54,28 @@ async function resolveVaultImages(html: string): Promise<string> {
  * Notes are local and self-generated, but they contain whatever the dictation
  * picked up, so sanitise before injecting rather than trusting the source.
  * Vault images are loaded as data URLs so they work without asset-protocol scope fights.
+ * `[[wiki links]]` become in-app navigable anchors.
  */
 export default function Markdown({ text, extraMenu, onEdit }: Props) {
   const [html, setHtml] = useState("");
   const menu = useContextMenu();
+  const navigate = useNavigate();
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const raw = marked.parse(text || "", { async: false }) as string;
+      const expanded = expandWikiLinks(text || "");
+      const raw = marked.parse(expanded, { async: false }) as string;
       const withImages = await resolveVaultImages(raw);
-      if (!cancelled) setHtml(DOMPurify.sanitize(withImages));
+      if (!cancelled) {
+        setHtml(
+          DOMPurify.sanitize(withImages, {
+            ALLOWED_URI_REGEXP:
+              /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|daybook):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+          })
+        );
+      }
     })();
     return () => {
       cancelled = true;
@@ -76,8 +88,20 @@ export default function Markdown({ text, extraMenu, onEdit }: Props) {
   return (
     <>
       <div
+        ref={rootRef}
         className="md"
         dangerouslySetInnerHTML={{ __html: html }}
+        onClick={(e) => {
+          const a = (e.target as HTMLElement).closest("a");
+          if (!a || !rootRef.current?.contains(a)) return;
+          const href = a.getAttribute("href") || "";
+          if (href.startsWith("daybook://")) {
+            e.preventDefault();
+            const target = decodeURIComponent(href.slice("daybook://".length));
+            const nav = pathToNav(target);
+            if (nav) navigate(nav);
+          }
+        }}
         onContextMenu={(e) => {
           const sel = window.getSelection()?.toString() ?? "";
           const items: MenuItem[] = [

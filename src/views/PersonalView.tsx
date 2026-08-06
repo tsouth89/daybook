@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errText } from "../api";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
+import NoteEditor from "../NoteEditor";
 
 type Props = {
   vaultPath: string;
@@ -13,6 +14,7 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const menu = useContextMenu();
 
   const refresh = useCallback(async () => {
@@ -41,9 +43,16 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
       await api.writePersonal(editing);
       setBody(editing);
       setEditing(null);
+      setDirty(false);
+      onNotice?.("Saved");
     } catch (e) {
       onError(errText(e));
     }
+  }
+
+  function cancel() {
+    setEditing(null);
+    setDirty(false);
   }
 
   async function refreshOverview() {
@@ -51,7 +60,10 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
     try {
       const next = await api.refreshPersonalOverview();
       setBody(next);
-      if (editing !== null) setEditing(next);
+      if (editing !== null) {
+        setEditing(next);
+        setDirty(true);
+      }
     } catch (e) {
       onError(errText(e));
     } finally {
@@ -67,7 +79,10 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
   const pageMenu = [
     {
       label: "Edit",
-      onClick: () => setEditing(body || "# Personal\n\n"),
+      onClick: () => {
+        setEditing(body || "# Personal\n\n");
+        setDirty(false);
+      },
     },
     {
       label: "Refresh summary",
@@ -93,25 +108,33 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
       className="detail"
       style={{ flex: 1 }}
       onContextMenu={(e) => {
-        if ((e.target as HTMLElement).closest(".md, textarea, .ctxmenu")) return;
+        if ((e.target as HTMLElement).closest(".md, .cm-editor, .ctxmenu, .note-editor")) return;
         menu.open(e, pageMenu);
       }}
     >
       <div className="toolbar">
-        <div className="dim tiny">Personal rollup</div>
+        <div className="dim tiny">
+          Personal rollup{dirty ? " · unsaved" : ""}
+        </div>
         <div className="grow" />
         {editing === null ? (
           <>
             <button className="btn" onClick={refreshOverview} disabled={busy}>
               {busy ? "Refreshing…" : "Refresh summary"}
             </button>
-            <button className="btn" onClick={() => setEditing(body || "# Personal\n\n")}>
+            <button
+              className="btn"
+              onClick={() => {
+                setEditing(body || "# Personal\n\n");
+                setDirty(false);
+              }}
+            >
               Edit
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={() => setEditing(null)}>
+            <button className="btn" onClick={cancel}>
               Cancel
             </button>
             <button className="btn primary" onClick={save}>
@@ -120,19 +143,25 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
           </>
         )}
       </div>
-      <div className="content">
+      <div className={`content ${editing !== null ? "has-editor" : ""}`}>
         {editing !== null ? (
-          <textarea
-            className="rawedit"
+          <NoteEditor
             value={editing}
-            onChange={(e) => setEditing(e.target.value)}
-            spellCheck={false}
+            onChange={(v) => {
+              setEditing(v);
+              setDirty(v !== body);
+            }}
+            vaultPath={vaultPath}
+            onSave={() => void save()}
           />
         ) : hasContent ? (
           <Markdown
             text={body}
             vaultPath={vaultPath}
-            onEdit={() => setEditing(body)}
+            onEdit={() => {
+              setEditing(body);
+              setDirty(false);
+            }}
             extraMenu={pageMenu.filter((i) => i.kind === "sep" || i.label !== "Edit")}
           />
         ) : (
@@ -143,7 +172,13 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
               notes directly.
             </p>
             <p className="dim" style={{ marginTop: 16 }}>
-              <button className="btn" onClick={() => setEditing("# Personal\n\n")}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setEditing("# Personal\n\n");
+                  setDirty(false);
+                }}
+              >
                 Start writing
               </button>
             </p>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errText } from "../api";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
+import NoteEditor from "../NoteEditor";
 
 type Props = {
   vaultPath: string;
@@ -12,6 +13,7 @@ type Props = {
 export default function IdeasView({ vaultPath, onError, onNotice }: Props) {
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const menu = useContextMenu();
 
   const refresh = useCallback(async () => {
@@ -40,6 +42,8 @@ export default function IdeasView({ vaultPath, onError, onNotice }: Props) {
       await api.writeIdeas(editing);
       setBody(editing);
       setEditing(null);
+      setDirty(false);
+      onNotice?.("Saved");
     } catch (e) {
       onError(errText(e));
     }
@@ -53,7 +57,10 @@ export default function IdeasView({ vaultPath, onError, onNotice }: Props) {
   const pageMenu = [
     {
       label: "Edit",
-      onClick: () => setEditing(body || "# Ideas\n\n"),
+      onClick: () => {
+        setEditing(body || "# Ideas\n\n");
+        setDirty(false);
+      },
     },
     { kind: "sep" as const },
     {
@@ -74,20 +81,32 @@ export default function IdeasView({ vaultPath, onError, onNotice }: Props) {
       className="detail"
       style={{ flex: 1 }}
       onContextMenu={(e) => {
-        if ((e.target as HTMLElement).closest(".md, textarea, .ctxmenu")) return;
+        if ((e.target as HTMLElement).closest(".md, .cm-editor, .ctxmenu, .note-editor")) return;
         menu.open(e, pageMenu);
       }}
     >
       <div className="toolbar">
-        <div className="dim tiny">Ideas</div>
+        <div className="dim tiny">Ideas{dirty ? " · unsaved" : ""}</div>
         <div className="grow" />
         {editing === null ? (
-          <button className="btn" onClick={() => setEditing(body || "# Ideas\n\n")}>
+          <button
+            className="btn"
+            onClick={() => {
+              setEditing(body || "# Ideas\n\n");
+              setDirty(false);
+            }}
+          >
             Edit
           </button>
         ) : (
           <>
-            <button className="btn" onClick={() => setEditing(null)}>
+            <button
+              className="btn"
+              onClick={() => {
+                setEditing(null);
+                setDirty(false);
+              }}
+            >
               Cancel
             </button>
             <button className="btn primary" onClick={save}>
@@ -96,19 +115,25 @@ export default function IdeasView({ vaultPath, onError, onNotice }: Props) {
           </>
         )}
       </div>
-      <div className="content">
+      <div className={`content ${editing !== null ? "has-editor" : ""}`}>
         {editing !== null ? (
-          <textarea
-            className="rawedit"
+          <NoteEditor
             value={editing}
-            onChange={(e) => setEditing(e.target.value)}
-            spellCheck={false}
+            onChange={(v) => {
+              setEditing(v);
+              setDirty(v !== body);
+            }}
+            vaultPath={vaultPath}
+            onSave={() => void save()}
           />
         ) : hasContent ? (
           <Markdown
             text={body}
             vaultPath={vaultPath}
-            onEdit={() => setEditing(body)}
+            onEdit={() => {
+              setEditing(body);
+              setDirty(false);
+            }}
             extraMenu={pageMenu.filter((i) => i.kind === "sep" || i.label !== "Edit")}
           />
         ) : (
@@ -118,7 +143,13 @@ export default function IdeasView({ vaultPath, onError, onNotice }: Props) {
               Maybe-someday thoughts land here after triage — or Edit and write them yourself.
             </p>
             <p className="dim" style={{ marginTop: 16 }}>
-              <button className="btn" onClick={() => setEditing("# Ideas\n\n")}>
+              <button
+                className="btn"
+                onClick={() => {
+                  setEditing("# Ideas\n\n");
+                  setDirty(false);
+                }}
+              >
                 Start writing
               </button>
             </p>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, errText, type SearchHit } from "../api";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import { pathToNav, useNavigate } from "../nav";
 
 export default function SearchView({
   onError,
@@ -13,6 +14,7 @@ export default function SearchView({
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [ran, setRan] = useState(false);
   const menu = useContextMenu();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!query.trim()) {
@@ -37,6 +39,12 @@ export default function SearchView({
     return acc;
   }, {});
 
+  function openPath(path: string) {
+    const nav = pathToNav(path);
+    if (nav) navigate(nav);
+    else onError(`Can't open ${path} in-app yet — use Reveal in vault.`);
+  }
+
   return (
     <div className="searchview">
       <input
@@ -51,6 +59,7 @@ export default function SearchView({
         <div className="dim tiny pad">
           {hits.length} match{hits.length === 1 ? "" : "es"} in {Object.keys(grouped).length} file
           {Object.keys(grouped).length === 1 ? "" : "s"}
+          <span className="dim"> · click a path to open</span>
         </div>
       )}
       <div className="content">
@@ -61,6 +70,10 @@ export default function SearchView({
             onContextMenu={(e) => {
               if ((e.target as HTMLElement).closest(".hit")) return;
               menu.open(e, [
+                {
+                  label: "Open in app",
+                  onClick: () => openPath(path),
+                },
                 {
                   label: "Copy path",
                   onClick: () => {
@@ -75,13 +88,20 @@ export default function SearchView({
               ]);
             }}
           >
-            <div className="hitpath mono">{path}</div>
+            <button type="button" className="hitpath mono linkish" onClick={() => openPath(path)}>
+              {path}
+            </button>
             {group.map((h, i) => (
               <div
                 key={i}
                 className="hit"
+                onDoubleClick={() => openPath(path)}
                 onContextMenu={(e) =>
                   menu.open(e, [
+                    {
+                      label: "Open in app",
+                      onClick: () => openPath(path),
+                    },
                     {
                       label: "Copy line",
                       onClick: () => {

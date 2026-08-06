@@ -3,13 +3,18 @@ import { api, errText, type ProjectEntry, type ProjectMeta } from "../api";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
+import NoteEditor from "../NoteEditor";
 
 export default function ProjectsView({
   vaultPath,
+  focusKey,
+  onFocusConsumed,
   onError,
   onNotice,
 }: {
   vaultPath: string;
+  focusKey?: string | null;
+  onFocusConsumed?: () => void;
   onError: (m: string) => void;
   onNotice?: (m: string) => void;
 }) {
@@ -28,6 +33,7 @@ export default function ProjectsView({
   const [confirmDelete, setConfirmDelete] = useState<{ kind: string; slug: string; name: string } | null>(
     null
   );
+  const [dirty, setDirty] = useState(false);
   const menu = useContextMenu();
 
   const refreshList = useCallback(async () => {
@@ -42,6 +48,12 @@ export default function ProjectsView({
     refreshList();
   }, [refreshList]);
 
+  useEffect(() => {
+    if (!focusKey) return;
+    setSelected(focusKey);
+    onFocusConsumed?.();
+  }, [focusKey, onFocusConsumed]);
+
   const visible = projects.filter((p) => {
     if (filter === "all") return true;
     if (filter === "project" || filter === "area") return p.kind === filter;
@@ -55,6 +67,7 @@ export default function ProjectsView({
   useEffect(() => {
     if (!selected) return;
     setEditing(null);
+    setDirty(false);
     const [kind, slug] = selected.split(":");
     api.readEntity(kind, slug).then(setBody).catch((e) => onError(errText(e)));
   }, [selected, onError]);
@@ -66,6 +79,8 @@ export default function ProjectsView({
       await api.writeEntity(kind, slug, editing);
       setBody(editing);
       setEditing(null);
+      setDirty(false);
+      onNotice?.("Saved");
       await refreshList();
     } catch (e) {
       onError(errText(e));
@@ -307,19 +322,32 @@ export default function ProjectsView({
         {selected ? (
           <>
             <div className="toolbar">
+              <div className="dim tiny">{dirty ? "Unsaved" : ""}</div>
               <div className="grow" />
               {editing === null ? (
                 <>
                   <button className="btn" onClick={() => refreshOverview()} disabled={busy}>
                     {busy ? "Refreshing…" : "Refresh summary"}
                   </button>
-                  <button className="btn" onClick={() => setEditing(body)}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setEditing(body);
+                      setDirty(false);
+                    }}
+                  >
                     Edit
                   </button>
                 </>
               ) : (
                 <>
-                  <button className="btn" onClick={() => setEditing(null)}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setEditing(null);
+                      setDirty(false);
+                    }}
+                  >
                     Cancel
                   </button>
                   <button className="btn primary" onClick={save}>
@@ -328,40 +356,25 @@ export default function ProjectsView({
                 </>
               )}
             </div>
-            <div className="content">
+            <div className={`content ${editing !== null ? "has-editor" : ""}`}>
               {editing !== null ? (
-                <textarea
-                  className="rawedit"
+                <NoteEditor
                   value={editing}
-                  onChange={(e) => setEditing(e.target.value)}
-                  spellCheck={false}
-                  onContextMenu={(e) => {
-                    const [kind, slug] = selected.split(":");
-                    menu.open(e, [
-                      {
-                        label: "Save",
-                        onClick: () => void save(),
-                      },
-                      {
-                        label: "Cancel edit",
-                        onClick: () => setEditing(null),
-                      },
-                      { kind: "sep" },
-                      {
-                        label: "Reveal in vault",
-                        onClick: () =>
-                          void api
-                            .revealPath(relPath(kind, slug))
-                            .catch((err) => onError(errText(err))),
-                      },
-                    ]);
+                  onChange={(v) => {
+                    setEditing(v);
+                    setDirty(v !== body);
                   }}
+                  vaultPath={vaultPath}
+                  onSave={() => void save()}
                 />
               ) : (
                 <Markdown
                   text={body}
                   vaultPath={vaultPath}
-                  onEdit={() => setEditing(body)}
+                  onEdit={() => {
+                    setEditing(body);
+                    setDirty(false);
+                  }}
                   extraMenu={
                     selected
                       ? [
