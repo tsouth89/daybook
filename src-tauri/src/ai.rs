@@ -435,7 +435,6 @@ async fn call_openai_compatible(
 
     let mut body = json!({
         "model": req.model,
-        "max_tokens": 8000,
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user_content }
@@ -444,11 +443,14 @@ async fn call_openai_compatible(
     });
 
     if !strict_schema {
-        // DeepSeek: thinking is on by default and costs output tokens. Triage
-        // does not need it — keep Flash cheap and fast.
+        // DeepSeek still uses max_tokens; thinking is on by default and costs
+        // output tokens. Triage does not need it — keep Flash cheap and fast.
+        body["max_tokens"] = json!(8000);
         body["thinking"] = json!({ "type": "disabled" });
     } else {
-        // GPT-5.6 family accepts reasoning effort on chat completions.
+        // GPT-5.6 (and newer OpenAI reasoning models) reject max_tokens —
+        // they want max_completion_tokens (covers visible output + reasoning).
+        body["max_completion_tokens"] = json!(8000);
         let effort = match req.effort {
             "low" | "minimal" | "none" => "low",
             "high" | "xhigh" | "max" => "high",
