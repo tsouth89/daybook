@@ -1,0 +1,128 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, errText, type DayEntry, type Settings } from "./api";
+import DaysView from "./views/DaysView";
+import InboxView from "./views/InboxView";
+import ProjectsView from "./views/ProjectsView";
+import SearchView from "./views/SearchView";
+import SettingsView from "./views/SettingsView";
+
+type Tab = "inbox" | "days" | "projects" | "search" | "settings";
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>("inbox");
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [days, setDays] = useState<DayEntry[]>([]);
+  const [inboxCount, setInboxCount] = useState(0);
+  const [banner, setBanner] = useState<string | null>(null);
+
+  const refreshDays = useCallback(async () => {
+    try {
+      setDays(await api.listDays());
+    } catch (e) {
+      setBanner(errText(e));
+    }
+  }, []);
+
+  const refreshInbox = useCallback(async () => {
+    try {
+      const items = await api.listInbox();
+      setInboxCount(items.length);
+    } catch {
+      /* ignore — vault may not exist yet */
+    }
+  }, []);
+
+  useEffect(() => {
+    api.getSettings().then(setSettings).catch((e) => setBanner(errText(e)));
+    refreshDays();
+    refreshInbox();
+  }, [refreshDays, refreshInbox]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      refreshDays();
+      refreshInbox();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshDays, refreshInbox]);
+
+  const needsKey = settings && !settings.api_key.trim();
+
+  return (
+    <div className="shell">
+      <nav className="sidebar">
+        <div className="brand">Daybook</div>
+        {(
+          [
+            ["inbox", inboxCount ? `Inbox (${inboxCount})` : "Inbox"],
+            ["days", "Days"],
+            ["projects", "Projects"],
+            ["search", "Search"],
+            ["settings", "Settings"],
+          ] as [Tab, string][]
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            className={`navitem ${tab === k ? "active" : ""}`}
+            onClick={() => setTab(k)}
+          >
+            {label}
+          </button>
+        ))}
+        <div className="spacer" />
+        {settings && (
+          <div className="vaultbox">
+            <div className="dim tiny">Vault</div>
+            <div className="tiny mono wrap">{settings.vault_path}</div>
+            <button className="btn tiny-btn" onClick={() => api.revealVault()}>
+              Open folder
+            </button>
+          </div>
+        )}
+      </nav>
+
+      <main className="main">
+        {banner && (
+          <div className="banner bad" onClick={() => setBanner(null)}>
+            {banner} <span className="dim">(click to dismiss)</span>
+          </div>
+        )}
+        {needsKey && tab !== "settings" && (
+          <div className="banner warn">
+            No API key set, so captures stay in the inbox until you add one.{" "}
+            <button className="linkbtn" onClick={() => setTab("settings")}>
+              Add one in Settings
+            </button>
+          </div>
+        )}
+
+        {tab === "inbox" && (
+          <InboxView
+            onChanged={() => {
+              refreshDays();
+              refreshInbox();
+            }}
+            onError={setBanner}
+          />
+        )}
+        {tab === "days" && (
+          <DaysView days={days} onChanged={refreshDays} onError={setBanner} />
+        )}
+        {tab === "projects" && <ProjectsView onError={setBanner} />}
+        {tab === "search" && <SearchView onError={setBanner} />}
+        {tab === "settings" && settings && (
+          <SettingsView
+            settings={settings}
+            onSaved={(s) => {
+              setSettings(s);
+              refreshDays();
+              refreshInbox();
+            }}
+            onError={setBanner}
+          />
+        )}
+      </main>
+    </div>
+  );
+}
