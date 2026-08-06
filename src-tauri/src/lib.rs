@@ -1,5 +1,6 @@
 mod ai;
 mod config;
+mod datetime;
 mod vault;
 
 use base64::Engine;
@@ -403,6 +404,8 @@ fn apply_triage(
     item: &vault::InboxItem,
     triage: &ai::TriageResult,
     known: &mut Vec<ProjectMeta>,
+    date_fmt: &str,
+    time_fmt: &str,
 ) -> Result<ItemProcessResult, String> {
     let mut destinations = Vec::new();
     let mut new_entities = Vec::new();
@@ -437,7 +440,16 @@ fn apply_triage(
                 } else {
                     format!("{} — {}", e.title, e.body.trim())
                 };
-                vault::append_idea(v, &item.date, &item.time, &e.scope, &text).map_err(err)?;
+                vault::append_idea(
+                    v,
+                    &item.date,
+                    &item.time,
+                    &e.scope,
+                    &text,
+                    date_fmt,
+                    time_fmt,
+                )
+                .map_err(err)?;
                 destinations.push(format!("idea ({})", e.scope));
             }
             "task" => {
@@ -446,7 +458,7 @@ fn apply_triage(
                 } else {
                     e.title.trim()
                 };
-                vault::append_task(v, &item.date, &e.scope, label, e.due.as_deref())
+                vault::append_task(v, &item.date, &e.scope, label, e.due.as_deref(), date_fmt)
                     .map_err(err)?;
                 destinations.push(format!("task ({})", e.scope));
             }
@@ -459,7 +471,7 @@ fn apply_triage(
     // Personal rollup: every personal-scoped entry also lands in personal.md.
     let has_personal = triage.entries.iter().any(|e| e.scope == "personal");
     if has_personal {
-        vault::clear_personal_item(v, &item.id).map_err(err)?;
+        vault::clear_personal_item(v, &item.id, date_fmt).map_err(err)?;
         for e in &triage.entries {
             if e.scope != "personal" {
                 continue;
@@ -504,6 +516,8 @@ fn apply_triage(
                 &e.title,
                 &dest,
                 &body,
+                date_fmt,
+                time_fmt,
             )
             .map_err(err)?;
             if !destinations.iter().any(|d| d.starts_with("personal")) {
@@ -522,8 +536,18 @@ fn apply_triage(
         } else {
             body.clone()
         };
-        vault::upsert_entity_day(v, kind, slug, name, scope, &item.date, &item.id, &body)
-            .map_err(err)?;
+        vault::upsert_entity_day(
+            v,
+            kind,
+            slug,
+            name,
+            scope,
+            &item.date,
+            &item.id,
+            &body,
+            date_fmt,
+        )
+        .map_err(err)?;
         destinations.push(format!("{kind}/{slug}"));
 
         if !known.iter().any(|k| k.slug == *slug) {
@@ -546,7 +570,15 @@ fn apply_triage(
         }
     }
 
-    vault::append_raw_item(v, &item.date, Some(&item.id), &item.text).map_err(err)?;
+    vault::append_raw_item(
+        v,
+        &item.date,
+        Some(&item.id),
+        &item.text,
+        date_fmt,
+        time_fmt,
+    )
+    .map_err(err)?;
 
     let day_body = vault::ensure_attachment_markdown(
         &item.text,
@@ -561,6 +593,8 @@ fn apply_triage(
         &title,
         &triage.summary,
         &day_body,
+        date_fmt,
+        time_fmt,
     )
     .map_err(err)?;
 
@@ -710,7 +744,14 @@ async fn process_inbox(
         };
 
         let before = known.len();
-        match apply_triage(&v, item, &triage, &mut known) {
+        match apply_triage(
+            &v,
+            item,
+            &triage,
+            &mut known,
+            &s.date_format,
+            &s.time_format,
+        ) {
             Ok(r) => {
                 if known.len() > before {
                     learned_any = true;

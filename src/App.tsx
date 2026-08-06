@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type DayEntry, type Settings } from "./api";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
+import { FormatProvider } from "./FormatContext";
 import { NavProvider, type NavTarget } from "./nav";
 import DaysView from "./views/DaysView";
 import HistoryView from "./views/HistoryView";
@@ -109,7 +110,11 @@ export default function App() {
   }, []);
 
   return (
-    <NavProvider navigate={navigate}>
+    <FormatProvider
+      dateFormat={settings?.date_format}
+      timeFormat={settings?.time_format}
+    >
+      <NavProvider navigate={navigate}>
       <div className="shell">
         <nav
           className="sidebar"
@@ -285,5 +290,6 @@ export default function App() {
         <ContextMenu {...menu.menuProps} />
       </div>
     </NavProvider>
+    </FormatProvider>
   );
 }

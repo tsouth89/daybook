@@ -255,19 +255,34 @@ fn sanitize_id(id: &str) -> String {
 /// Appends a timestamped block to a day's raw file. Never overwrites.
 #[allow(dead_code)]
 pub fn append_raw(v: &Path, date: &str, text: &str) -> Result<()> {
-    append_raw_item(v, date, None, text)
+    append_raw_item(
+        v,
+        date,
+        None,
+        text,
+        crate::datetime::DEFAULT_DATE_FORMAT,
+        crate::datetime::DEFAULT_TIME_FORMAT,
+    )
 }
 
-pub fn append_raw_item(v: &Path, date: &str, item_id: Option<&str>, text: &str) -> Result<()> {
+pub fn append_raw_item(
+    v: &Path,
+    date: &str,
+    item_id: Option<&str>,
+    text: &str,
+    date_fmt: &str,
+    time_fmt: &str,
+) -> Result<()> {
     valid_date(date)?;
     ensure_vault(v)?;
     let path = raw_dir(v).join(format!("{date}.md"));
 
     let mut out = String::new();
     if !path.exists() {
-        out.push_str(&format!("# {date} (raw)\n\n"));
+        let title = crate::datetime::format_date(date, date_fmt);
+        out.push_str(&format!("# {title} (raw)\n\n"));
     }
-    let stamp = Local::now().format("%H:%M").to_string();
+    let stamp = crate::datetime::format_time(&Local::now().format("%H:%M").to_string(), time_fmt);
     match item_id {
         Some(id) => out.push_str(&format!("## {stamp} · `{id}`\n\n")),
         None => out.push_str(&format!("## {stamp}\n\n")),
@@ -475,6 +490,7 @@ pub fn upsert_entity_day(
     date: &str,
     item_id: &str,
     body: &str,
+    date_fmt: &str,
 ) -> Result<()> {
     valid_date(date)?;
     ensure_vault(v)?;
@@ -486,6 +502,7 @@ pub fn upsert_entity_day(
 
     // Parse ## date sections. Inside each date, ### `item_id` subsections.
     // Content under a date with no item markers is kept as `_legacy`.
+    // Date keys are always ISO; headings may be in the user's display format.
     let mut by_date: Vec<(String, Vec<(String, String)>)> = Vec::new();
     let mut cur_date: Option<String> = None;
     let mut cur_items: Vec<(String, String)> = Vec::new();
@@ -506,12 +523,12 @@ pub fn upsert_entity_day(
     for line in existing.lines() {
         if let Some(rest) = line.strip_prefix("## ") {
             let candidate = rest.trim();
-            if valid_date(candidate).is_ok() {
+            if let Some(iso) = crate::datetime::parse_date_to_iso(candidate, date_fmt) {
                 flush_item(&mut cur_item_id, &mut cur_body, &mut cur_items);
                 if let Some(d) = cur_date.take() {
                     by_date.push((d, std::mem::take(&mut cur_items)));
                 }
-                cur_date = Some(candidate.to_string());
+                cur_date = Some(iso);
                 continue;
             }
         }
@@ -562,12 +579,13 @@ pub fn upsert_entity_day(
     out.push_str("Standing view of recent activity. Full dated log is below.\n\n");
     let mut overview_lines = 0usize;
     for (d, items) in &by_date {
+        let d_disp = crate::datetime::format_date(d, date_fmt);
         for (_id, b) in items {
             let title = overview_title_from_body(b);
             if title.is_empty() {
                 continue;
             }
-            out.push_str(&format!("- **{d}**: {title}\n"));
+            out.push_str(&format!("- **{d_disp}**: {title}\n"));
             overview_lines += 1;
             if overview_lines >= 8 {
                 break;
@@ -583,7 +601,8 @@ pub fn upsert_entity_day(
     out.push('\n');
 
     for (d, items) in by_date {
-        out.push_str(&format!("## {d}\n\n"));
+        let d_disp = crate::datetime::format_date(&d, date_fmt);
+        out.push_str(&format!("## {d_disp}\n\n"));
         for (id, b) in items {
             if id == "_legacy" {
                 if !b.is_empty() {
@@ -863,7 +882,15 @@ pub fn list_projects(v: &Path) -> Result<Vec<ProjectEntry>> {
 // ----------------------------------------------------------- ideas / tasks
 
 /// Append a dated idea bullet. Ideas are maybe-someday; they don't own a file.
-pub fn append_idea(v: &Path, date: &str, time: &str, scope: &str, text: &str) -> Result<()> {
+pub fn append_idea(
+    v: &Path,
+    date: &str,
+    time: &str,
+    scope: &str,
+    text: &str,
+    date_fmt: &str,
+    time_fmt: &str,
+) -> Result<()> {
     valid_date(date)?;
     ensure_vault(v)?;
     let path = ideas_path(v);
@@ -872,18 +899,31 @@ pub fn append_idea(v: &Path, date: &str, time: &str, scope: &str, text: &str) ->
         existing.push('\n');
     }
 
-    let heading = format!("## {date}");
-    let bullet = format!("- **{time}** ({scope}) {}\n", text.trim());
+    let display_date = crate::datetime::format_date(date, date_fmt);
+    let display_time = crate::datetime::format_time(time, time_fmt);
+    let bullet = format!("- **{display_time}** ({scope}) {}\n", text.trim());
 
-    if let Some(pos) = existing.find(&heading) {
-        // Insert after the heading line.
-        let after_heading = existing[pos..]
-            .find('\n')
-            .map(|i| pos + i + 1)
-            .unwrap_or(existing.len());
+    // Match an existing ## heading for the same calendar day (any display format).
+    let mut insert_at: Option<usize> = None;
+    for line in existing.lines() {
+        if let Some(rest) = line.strip_prefix("## ") {
+            if crate::datetime::parse_date_to_iso(rest.trim(), date_fmt).as_deref() == Some(date) {
+                if let Some(pos) = existing.find(line) {
+                    let after = existing[pos..]
+                        .find('\n')
+                        .map(|i| pos + i + 1)
+                        .unwrap_or(existing.len());
+                    insert_at = Some(after);
+                }
+                break;
+            }
+        }
+    }
+
+    if let Some(after_heading) = insert_at {
         existing.insert_str(after_heading, &format!("\n{bullet}"));
     } else {
-        existing.push_str(&format!("\n{heading}\n\n{bullet}"));
+        existing.push_str(&format!("\n## {display_date}\n\n{bullet}"));
     }
     std::fs::write(&path, existing)?;
     Ok(())
@@ -896,6 +936,7 @@ pub fn append_task(
     scope: &str,
     text: &str,
     due: Option<&str>,
+    date_fmt: &str,
 ) -> Result<()> {
     valid_date(date)?;
     if let Some(d) = due {
@@ -907,9 +948,12 @@ pub fn append_task(
     if !existing.ends_with('\n') {
         existing.push('\n');
     }
-    let due_bit = due.map(|d| format!(" · due {d}")).unwrap_or_default();
+    let captured = crate::datetime::format_date(date, date_fmt);
+    let due_bit = due
+        .map(|d| format!(" · due {}", crate::datetime::format_date(d, date_fmt)))
+        .unwrap_or_default();
     existing.push_str(&format!(
-        "- [ ] ({scope}) {} — captured {date}{due_bit}\n",
+        "- [ ] ({scope}) {} — captured {captured}{due_bit}\n",
         text.trim()
     ));
     std::fs::write(&path, existing)?;
@@ -926,6 +970,8 @@ pub fn upsert_day_item(
     title: &str,
     summary_bullets: &[String],
     body: &str,
+    date_fmt: &str,
+    time_fmt: &str,
 ) -> Result<()> {
     valid_date(date)?;
     ensure_vault(v)?;
@@ -981,20 +1027,22 @@ pub fn upsert_day_item(
     sections.retain(|(id, _, _, _)| id != item_id);
     let title = title.trim();
     let title = if title.is_empty() { "Entry" } else { title };
+    let display_time = crate::datetime::format_time(time, time_fmt);
     sections.push((
         item_id.to_string(),
-        time.to_string(),
+        display_time,
         title.chars().take(80).collect(),
         body.trim().to_string(),
     ));
     sections.sort_by(|a, b| a.1.cmp(&b.1));
 
+    let display_date = crate::datetime::format_date(date, date_fmt);
     let mut out = String::new();
     out.push_str("---\n");
     out.push_str(&format!("date: {date}\n"));
     out.push_str("type: daily\n");
     out.push_str("---\n\n");
-    out.push_str(&format!("# {date}\n\n"));
+    out.push_str(&format!("# {display_date}\n\n"));
     if !glances.is_empty() {
         out.push_str("## At a glance\n\n");
         for (id, text) in &glances {
@@ -1117,7 +1165,7 @@ pub fn read_personal(v: &Path) -> String {
 }
 
 /// Remove every personal.md section belonging to a capture id (for re-triage).
-pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
+pub fn clear_personal_item(v: &Path, item_id: &str, date_fmt: &str) -> Result<()> {
     ensure_vault(v)?;
     let path = personal_path(v);
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -1125,6 +1173,20 @@ pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
         return Ok(());
     }
 
+    let mut by_date = parse_personal_by_date(&existing, date_fmt);
+    for (_, items) in &mut by_date {
+        items.retain(|(id, _, _, _, _)| id != item_id);
+    }
+    by_date.retain(|(_, items)| !items.is_empty());
+    by_date.sort_by(|a, b| b.0.cmp(&a.0));
+    std::fs::write(&path, render_personal_document(&by_date, date_fmt))?;
+    Ok(())
+}
+
+fn parse_personal_by_date(
+    existing: &str,
+    date_fmt: &str,
+) -> Vec<(String, Vec<(String, String, String, String, String)>)> {
     let mut by_date: Vec<(String, Vec<(String, String, String, String, String)>)> = Vec::new();
     let mut cur_date: Option<String> = None;
     let mut cur_items: Vec<(String, String, String, String, String)> = Vec::new();
@@ -1142,12 +1204,12 @@ pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
     for line in existing.lines() {
         if let Some(rest) = line.strip_prefix("## ") {
             let candidate = rest.trim();
-            if valid_date(candidate).is_ok() {
+            if let Some(iso) = crate::datetime::parse_date_to_iso(candidate, date_fmt) {
                 flush_item(&mut cur, &mut cur_items);
                 if let Some(d) = cur_date.take() {
                     by_date.push((d, std::mem::take(&mut cur_items)));
                 }
-                cur_date = Some(candidate.to_string());
+                cur_date = Some(iso);
                 continue;
             }
         }
@@ -1177,18 +1239,12 @@ pub fn clear_personal_item(v: &Path, item_id: &str) -> Result<()> {
     if let Some(d) = cur_date.take() {
         by_date.push((d, cur_items));
     }
-
-    for (_, items) in &mut by_date {
-        items.retain(|(id, _, _, _, _)| id != item_id);
-    }
-    by_date.retain(|(_, items)| !items.is_empty());
-    by_date.sort_by(|a, b| b.0.cmp(&a.0));
-    std::fs::write(&path, render_personal_document(&by_date))?;
-    Ok(())
+    by_date
 }
 
 fn render_personal_document(
     by_date: &[(String, Vec<(String, String, String, String, String)>)],
+    date_fmt: &str,
 ) -> String {
     let mut out = String::new();
     out.push_str(
@@ -1201,8 +1257,9 @@ fn render_personal_document(
     out.push_str("Standing view of personal life threads. Dated log is below.\n\n");
     let mut overview_lines = 0usize;
     for (d, items) in by_date {
+        let d_disp = crate::datetime::format_date(d, date_fmt);
         for (_id, _t, tit, dest, _b) in items {
-            out.push_str(&format!("- **{d}**: {tit} · {dest}\n"));
+            out.push_str(&format!("- **{d_disp}**: {tit} · {dest}\n"));
             overview_lines += 1;
             if overview_lines >= 8 {
                 break;
@@ -1217,7 +1274,8 @@ fn render_personal_document(
     }
     out.push('\n');
     for (d, items) in by_date {
-        out.push_str(&format!("## {d}\n\n"));
+        let d_disp = crate::datetime::format_date(d, date_fmt);
+        out.push_str(&format!("## {d_disp}\n\n"));
         for (id, t, tit, dest, b) in items {
             out.push_str(&format!("### {t} · `{id}` · {tit} · {dest}\n\n"));
             if !b.is_empty() {
@@ -1239,69 +1297,19 @@ pub fn upsert_personal_item(
     title: &str,
     dest: &str,
     body: &str,
+    date_fmt: &str,
+    time_fmt: &str,
 ) -> Result<()> {
     valid_date(date)?;
     ensure_vault(v)?;
     let path = personal_path(v);
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut by_date = parse_personal_by_date(&existing, date_fmt);
 
-    // (id, time, title, dest, body)
-    let mut by_date: Vec<(String, Vec<(String, String, String, String, String)>)> = Vec::new();
-    let mut cur_date: Option<String> = None;
-    let mut cur_items: Vec<(String, String, String, String, String)> = Vec::new();
-    let mut cur: Option<(String, String, String, String, String)> = None;
-
-    let flush_item =
-        |cur: &mut Option<(String, String, String, String, String)>,
-         cur_items: &mut Vec<(String, String, String, String, String)>| {
-            if let Some(mut item) = cur.take() {
-                item.4 = item.4.trim_end().to_string();
-                cur_items.push(item);
-            }
-        };
-
-    for line in existing.lines() {
-        if let Some(rest) = line.strip_prefix("## ") {
-            let candidate = rest.trim();
-            if valid_date(candidate).is_ok() {
-                flush_item(&mut cur, &mut cur_items);
-                if let Some(d) = cur_date.take() {
-                    by_date.push((d, std::mem::take(&mut cur_items)));
-                }
-                cur_date = Some(candidate.to_string());
-                continue;
-            }
-        }
-        if cur_date.is_none() {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("### ") {
-            flush_item(&mut cur, &mut cur_items);
-            let parts: Vec<&str> = rest.splitn(4, " · ").collect();
-            if parts.len() >= 2 {
-                cur = Some((
-                    parts[1].trim().trim_matches('`').to_string(),
-                    parts[0].trim().to_string(),
-                    parts.get(2).unwrap_or(&"Entry").trim().to_string(),
-                    parts.get(3).unwrap_or(&"note").trim().to_string(),
-                    String::new(),
-                ));
-            }
-            continue;
-        }
-        if let Some(ref mut c) = cur {
-            c.4.push_str(line);
-            c.4.push('\n');
-        }
-    }
-    flush_item(&mut cur, &mut cur_items);
-    if let Some(d) = cur_date.take() {
-        by_date.push((d, cur_items));
-    }
-
+    let display_time = crate::datetime::format_time(time, time_fmt);
     let entry = (
         item_id.to_string(),
-        time.to_string(),
+        display_time,
         if title.trim().is_empty() {
             "Entry".into()
         } else {
@@ -1328,7 +1336,7 @@ pub fn upsert_personal_item(
         by_date.push((date.to_string(), vec![entry]));
     }
     by_date.sort_by(|a, b| b.0.cmp(&a.0));
-    std::fs::write(&path, render_personal_document(&by_date))?;
+    std::fs::write(&path, render_personal_document(&by_date, date_fmt))?;
     Ok(())
 }
 

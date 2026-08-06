@@ -12,6 +12,10 @@ export type Settings = {
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   capture_hotkey: string;
   context_days: number;
+  /** DD/MM/YYYY | MM/DD/YYYY | YYYY-MM-DD */
+  date_format: string;
+  /** 24h | 12h */
+  time_format: string;
 };
 
 export type DayEntry = {

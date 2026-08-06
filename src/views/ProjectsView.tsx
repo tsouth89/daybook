@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errText, type ProjectEntry, type ProjectMeta } from "../api";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
 import NoteEditor from "../NoteEditor";
 
@@ -35,6 +36,7 @@ export default function ProjectsView({
   );
   const [dirty, setDirty] = useState(false);
   const menu = useContextMenu();
+  const fmt = useFormat();
 
   const refreshList = useCallback(async () => {
     try {
@@ -301,7 +303,7 @@ export default function ProjectsView({
                 </span>
               </div>
               <div className="preview dim mono">
-                last: {p.last_date || "—"} · {p.day_count}d
+                last: {p.last_date ? fmt.date(p.last_date) : "—"} · {p.day_count}d
               </div>
             </button>
           );

@@ -8,6 +8,7 @@ import {
 } from "../api";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
 import NoteEditor from "../NoteEditor";
 
@@ -43,6 +44,7 @@ export default function DaysView({
   const [confirmRaw, setConfirmRaw] = useState(false);
   const pendingPane = useRef<"note" | "raw" | null>(null);
   const menu = useContextMenu();
+  const fmt = useFormat();
 
   useEffect(() => {
     if (!selected && days.length) setSelected(days[0].date);
@@ -176,7 +178,7 @@ export default function DaysView({
       {
         label: "Copy date",
         onClick: () => {
-          void copyText(d.date);
+          void copyText(fmt.date(d.date));
           onNotice?.("Copied date");
         },
       },
@@ -224,7 +226,7 @@ export default function DaysView({
             }}
           >
             <div className="row">
-              <span className="mono">{d.date}</span>
+              <span className="mono">{fmt.date(d.date)}</span>
               <span className={`pill ${d.has_note ? "ok" : "pending"}`}>
                 {d.has_note ? "note" : "raw"}
               </span>
@@ -354,7 +356,7 @@ export default function DaysView({
                             {
                               label: "Copy date",
                               onClick: () => {
-                                void copyText(selected);
+                                void copyText(fmt.date(selected));
                                 onNotice?.("Copied date");
                               },
                             },

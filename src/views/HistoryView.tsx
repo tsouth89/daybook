@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type HistoryItem } from "../api";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
 
 type Props = {
@@ -20,6 +21,7 @@ export default function HistoryView({
   const [selected, setSelected] = useState<string | null>(null);
   const [body, setBody] = useState("");
   const menu = useContextMenu();
+  const fmt = useFormat();
 
   const refresh = useCallback(async () => {
     try {
@@ -89,7 +91,7 @@ export default function HistoryView({
       {
         label: "Copy date",
         onClick: () => {
-          void copyText(item.date);
+          void copyText(fmt.date(item.date));
           onNotice?.("Copied date");
         },
       },
@@ -132,7 +134,7 @@ export default function HistoryView({
             >
               <div className="row">
                 <span className="mono">
-                  {item.date} {item.time || "—"}
+                  {fmt.dateTime(item.date, item.time || "")}
                 </span>
                 <span className={`pill ${item.has_day_note ? "ok" : "pending"}`}>
                   {item.has_day_note ? "filed" : "raw"}
@@ -148,7 +150,7 @@ export default function HistoryView({
           <>
             <div className="toolbar">
               <div className="mono dim">
-                {current.date} {current.time}
+                {fmt.dateTime(current.date, current.time || "")}
                 {current.id ? ` · ${current.id}` : ""}
               </div>
               <div className="grow" />

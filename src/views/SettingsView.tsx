@@ -142,6 +142,35 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
       </section>
 
       <section>
+        <h3>Date & time</h3>
+        <label>
+          <span>Date format</span>
+          <select
+            value={draft.date_format || "DD/MM/YYYY"}
+            onChange={(e) => set("date_format", e.target.value)}
+          >
+            <option value="DD/MM/YYYY">DD/MM/YYYY (06/08/2026)</option>
+            <option value="MM/DD/YYYY">MM/DD/YYYY (08/06/2026)</option>
+            <option value="YYYY-MM-DD">YYYY-MM-DD (2026-08-06)</option>
+          </select>
+        </label>
+        <label>
+          <span>Time format</span>
+          <select
+            value={draft.time_format || "24h"}
+            onChange={(e) => set("time_format", e.target.value)}
+          >
+            <option value="24h">24-hour (14:30)</option>
+            <option value="12h">12-hour (2:30 PM)</option>
+          </select>
+        </label>
+        <p className="dim tiny">
+          Used in the app UI and for new timestamps written into notes. File names and capture IDs
+          stay ISO (<span className="mono">YYYY-MM-DD</span>) so the vault stays portable.
+        </p>
+      </section>
+
+      <section>
         <h3>Model</h3>
         <label>
           <span>Provider</span>

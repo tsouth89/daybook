@@ -7,6 +7,7 @@ import {
 } from "../api";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
 
 type Props = {
@@ -28,6 +29,7 @@ export default function InboxView({
   const [result, setResult] = useState<InboxProcessResult | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
   const menu = useContextMenu();
+  const fmt = useFormat();
 
   const refresh = useCallback(async () => {
     try {
@@ -189,7 +191,7 @@ export default function InboxView({
           >
             <div className="row">
               <span className="mono">
-                {item.date} {item.time}
+                {fmt.dateTime(item.date, item.time)}
               </span>
               <span className="pill pending">{item.chars}c</span>
             </div>
@@ -241,7 +243,7 @@ export default function InboxView({
           <>
             <div className="toolbar">
               <div className="mono dim">
-                {current.date} {current.time} · {current.id}
+                {fmt.dateTime(current.date, current.time)} · {current.id}
               </div>
               <div className="grow" />
               <button

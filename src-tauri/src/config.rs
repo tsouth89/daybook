@@ -32,6 +32,12 @@ pub struct Settings {
     /// How many previous day-summaries to feed in as continuity context.
     #[serde(default = "default_context_days")]
     pub context_days: usize,
+    /// Display format for dates: DD/MM/YYYY | MM/DD/YYYY | YYYY-MM-DD
+    #[serde(default = "default_date_format")]
+    pub date_format: String,
+    /// Display format for times: 24h | 12h
+    #[serde(default = "default_time_format")]
+    pub time_format: String,
 }
 
 fn default_provider() -> String {
@@ -50,6 +56,12 @@ fn default_hotkey() -> String {
 fn default_context_days() -> usize {
     3
 }
+fn default_date_format() -> String {
+    crate::datetime::DEFAULT_DATE_FORMAT.into()
+}
+fn default_time_format() -> String {
+    crate::datetime::DEFAULT_TIME_FORMAT.into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -67,6 +79,8 @@ impl Default for Settings {
             effort: default_effort(),
             capture_hotkey: default_hotkey(),
             context_days: default_context_days(),
+            date_format: default_date_format(),
+            time_format: default_time_format(),
         }
     }
 }
