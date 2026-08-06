@@ -793,6 +793,83 @@ pub fn save_attachment(v: &Path, bytes: &[u8], ext: &str) -> Result<String> {
     Ok(format!("attachments/{name}"))
 }
 
+/// Markdown image refs like `![](attachments/foo.png)`.
+pub fn extract_attachment_refs(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut search_from = 0;
+    while let Some(i) = text[search_from..].find("attachments/") {
+        let start = search_from + i;
+        let tail = &text[start..];
+        let end = tail
+            .find(|c: char| c == ')' || c == '"' || c == ' ' || c == '\n')
+            .unwrap_or(tail.len());
+        let path = tail[..end].trim();
+        if !path.is_empty() && !out.iter().any(|p| p == path) {
+            out.push(path.to_string());
+        }
+        search_from = start + path.len();
+    }
+    out
+}
+
+pub fn read_attachment_bytes(v: &Path, rel: &str) -> Result<Vec<u8>> {
+    let rel = rel.trim().replace('\\', "/");
+    if rel.contains("..") || !rel.starts_with("attachments/") {
+        anyhow::bail!("Invalid attachment path: {rel}");
+    }
+    let path = v.join(&rel);
+    std::fs::read(&path).with_context(|| format!("reading {}", path.display()))
+}
+
+pub fn attachment_mime(rel: &str) -> String {
+    let ext = rel.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg".into(),
+        "gif" => "image/gif".into(),
+        "webp" => "image/webp".into(),
+        _ => "image/png".into(),
+    }
+}
+
+// ----------------------------------------------------------- ideas / tasks read
+
+pub fn read_ideas(v: &Path) -> String {
+    ensure_vault(v).ok();
+    std::fs::read_to_string(ideas_path(v)).unwrap_or_else(|_| "# Ideas\n\n".into())
+}
+
+pub fn read_tasks(v: &Path) -> String {
+    ensure_vault(v).ok();
+    std::fs::read_to_string(tasks_path(v)).unwrap_or_else(|_| "# Tasks\n\n".into())
+}
+
+/// Flip `- [ ]` ↔ `- [x]` on a 1-based line number in tasks.md.
+pub fn toggle_task_line(v: &Path, line: usize) -> Result<String> {
+    ensure_vault(v)?;
+    let path = tasks_path(v);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|_| "# Tasks\n\n".into());
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    if line == 0 || line > lines.len() {
+        anyhow::bail!("No task on line {line}");
+    }
+    let idx = line - 1;
+    let l = &lines[idx];
+    if l.contains("- [ ]") {
+        lines[idx] = l.replacen("- [ ]", "- [x]", 1);
+    } else if l.contains("- [x]") || l.contains("- [X]") {
+        lines[idx] = l.replacen("- [x]", "- [ ]", 1).replacen("- [X]", "- [ ]", 1);
+    } else {
+        anyhow::bail!("Line {line} is not a task checkbox");
+    }
+    let out = if text.ends_with('\n') {
+        format!("{}\n", lines.join("\n"))
+    } else {
+        lines.join("\n")
+    };
+    std::fs::write(&path, &out)?;
+    Ok(out)
+}
+
 // ------------------------------------------------------------------ search
 
 #[derive(Debug, Serialize)]

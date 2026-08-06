@@ -100,6 +100,7 @@ kbd {
   padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12px;
 }
 .capture-foot > :first-child { flex: 1; }
+.capture.drag-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
 
 /* ---------------------------------------------------------------- shell */
 
@@ -113,7 +114,8 @@ kbd {
   padding: 14px 10px;
   gap: 2px;
 }
-.brand { font-weight: 700; font-size: 15px; padding: 4px 10px 14px; letter-spacing: 0.3px; }
+.brand { font-weight: 700; font-size: 15px; padding: 4px 10px 8px; letter-spacing: 0.3px; }
+.capture-btn { width: 100%; margin-bottom: 8px; }
 .navitem {
   background: none; border: none; color: var(--dim);
   text-align: left; padding: 8px 10px; border-radius: 6px;
@@ -198,6 +200,30 @@ kbd {
 
 .empty { padding: 60px 40px; max-width: 560px; }
 .empty h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+
+.section-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--dim);
+  margin: 0 0 12px;
+}
+.pad-top { padding-top: 4px; margin-bottom: 16px; }
+.tasklist {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px;
+}
+.tasklist li { margin: 8px 0; }
+.tasklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.tasklist.done span { text-decoration: line-through; color: var(--dim); }
+.tasklist input { margin-top: 3px; flex-shrink: 0; }
 
 /* ------------------------------------------------------------- markdown */
 

@@ -3,22 +3,40 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, errText } from "./api";
 
+async function attachImageFile(
+  file: File,
+  text: string,
+  cursor: number
+): Promise<{ text: string; cursor: number }> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (const b of buf) bin += String.fromCharCode(b);
+  const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+  const rel = await api.saveAttachment(btoa(bin), ext);
+  const md = `\n![](${rel})\n`;
+  const next = text.slice(0, cursor) + md + text.slice(cursor);
+  return { text: next, cursor: cursor + md.length };
+}
+
 /**
  * The always-on-top capture overlay. Everything here is in service of one goal:
  * the gap between "I have a thought" and "it is on disk" should be as close to
  * zero as possible. No project picker, no tags, no date field. Dump and dismiss.
+ *
+ * Spokenly (or any dictation tool) types into the focused textarea like a keyboard.
  */
 export default function Capture() {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     ref.current?.focus();
     const un = listen("capture-focus", () => {
-      ref.current?.focus();
       setError(null);
+      ref.current?.focus();
     });
     return () => {
       un.then((f) => f());
@@ -34,12 +52,10 @@ export default function Capture() {
       await api.appendEntry(text);
       setText("");
       setError(null);
-      setStatus("Saved");
+      setStatus("Saved to inbox");
       setTimeout(() => setStatus(null), 1200);
       await api.hideCapture();
     } catch (e) {
-      // Keep the text in the box on failure. Losing a dictation to a disk
-      // error would be the single worst thing this app could do.
       setError(errText(e));
     }
   }
@@ -49,6 +65,20 @@ export default function Capture() {
     api.hideCapture();
   }
 
+  async function ingestImage(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    try {
+      const at = ref.current?.selectionStart ?? text.length;
+      const next = await attachImageFile(file, text, at);
+      setText(next.text);
+      setStatus("Image attached");
+      setTimeout(() => setStatus(null), 1500);
+      ref.current?.focus();
+    } catch (err) {
+      setError(errText(err));
+    }
+  }
+
   async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const item = Array.from(e.clipboardData.items).find((i) =>
       i.type.startsWith("image/")
@@ -56,21 +86,26 @@ export default function Capture() {
     if (!item) return;
     e.preventDefault();
     const file = item.getAsFile();
-    if (!file) return;
-    try {
-      const buf = new Uint8Array(await file.arrayBuffer());
-      let bin = "";
-      for (const b of buf) bin += String.fromCharCode(b);
-      const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
-      const rel = await api.saveAttachment(btoa(bin), ext);
-      const el = ref.current;
-      const at = el?.selectionStart ?? text.length;
-      const md = `\n![](${rel})\n`;
-      setText(text.slice(0, at) + md + text.slice(at));
-      setStatus("Image attached");
-      setTimeout(() => setStatus(null), 1500);
-    } catch (err) {
-      setError(errText(err));
+    if (file) await ingestImage(file);
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(true);
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+  }
+
+  async function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    for (const file of Array.from(e.dataTransfer.files)) {
+      if (file.type.startsWith("image/")) {
+        await ingestImage(file);
+      }
     }
   }
 
@@ -79,7 +114,6 @@ export default function Capture() {
       e.preventDefault();
       dismiss();
     }
-    // Ctrl+Enter rather than Enter: dictation inserts newlines constantly.
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       save();
@@ -87,7 +121,12 @@ export default function Capture() {
   }
 
   return (
-    <div className="capture">
+    <div
+      className={`capture ${dragOver ? "drag-over" : ""}`}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div className="capture-bar" onMouseDown={() => getCurrentWindow().startDragging()}>
         <span className="capture-title">Daybook</span>
         <span className="capture-hint">Ctrl+Enter save · Esc dismiss</span>
@@ -96,7 +135,7 @@ export default function Capture() {
         ref={ref}
         className="capture-input"
         value={text}
-        placeholder="Dump anything — it'll land in the inbox"
+        placeholder="Dictate, type, or drop images — lands in inbox"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
@@ -109,7 +148,9 @@ export default function Capture() {
           <span className="good">{status}</span>
         ) : (
           <span className="dim">
-            {text.trim() ? `${text.trim().split(/\s+/).length} words` : "Paste images directly"}
+            {text.trim()
+              ? `${text.trim().split(/\s+/).length} words`
+              : "Paste or drag images · markdown OK"}
           </span>
         )}
         <button className="btn primary" onClick={save} disabled={!text.trim()}>

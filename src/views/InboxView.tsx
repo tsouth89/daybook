@@ -5,13 +5,15 @@ import {
   type InboxItem,
   type InboxProcessResult,
 } from "../api";
+import Markdown from "../Markdown";
 
 type Props = {
+  vaultPath: string;
   onChanged: () => void;
   onError: (msg: string) => void;
 };
 
-export default function InboxView({ onChanged, onError }: Props) {
+export default function InboxView({ vaultPath, onChanged, onError }: Props) {
   const [items, setItems] = useState<InboxItem[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -165,7 +167,7 @@ export default function InboxView({ onChanged, onError }: Props) {
               </button>
             </div>
             <div className="content">
-              <pre className="raw">{current.text}</pre>
+              <Markdown text={current.text} vaultPath={vaultPath} />
             </div>
           </>
         ) : (

@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { api, errText, type ProjectEntry } from "../api";
 import Markdown from "../Markdown";
 
-export default function ProjectsView({ onError }: { onError: (m: string) => void }) {
+export default function ProjectsView({
+  vaultPath,
+  onError,
+}: {
+  vaultPath: string;
+  onError: (m: string) => void;
+}) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [body, setBody] = useState("");
@@ -87,7 +93,7 @@ export default function ProjectsView({ onError }: { onError: (m: string) => void
       </div>
       <div className="detail">
         <div className="content">
-          <Markdown text={body} />
+          <Markdown text={body} vaultPath={vaultPath} />
         </div>
       </div>
     </div>

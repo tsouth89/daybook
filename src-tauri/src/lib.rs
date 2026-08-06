@@ -108,6 +108,30 @@ fn hide_capture(app: tauri::AppHandle) {
     }
 }
 
+#[tauri::command]
+fn show_capture(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("capture") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = w.emit("capture-focus", ());
+    }
+}
+
+#[tauri::command]
+fn read_tasks(state: tauri::State<AppState>) -> String {
+    vault::read_tasks(&state.settings().vault())
+}
+
+#[tauri::command]
+fn read_ideas(state: tauri::State<AppState>) -> String {
+    vault::read_ideas(&state.settings().vault())
+}
+
+#[tauri::command]
+fn toggle_task_line(state: tauri::State<AppState>, line: usize) -> CmdResult<String> {
+    vault::toggle_task_line(&state.settings().vault(), line).map_err(err)
+}
+
 // -------------------------------------------------------------------- read
 
 #[derive(Serialize)]
@@ -380,6 +404,7 @@ async fn process_inbox(
             date: &item.date,
             time: &item.time,
             text: &item.text,
+            vault: &v,
             projects: &known,
             glossary: &glossary,
             profile: &profile,
@@ -526,6 +551,10 @@ pub fn run() {
             delete_inbox_item,
             save_attachment,
             hide_capture,
+            show_capture,
+            read_tasks,
+            read_ideas,
+            toggle_task_line,
             list_days,
             read_day,
             write_raw,

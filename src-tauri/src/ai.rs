@@ -195,12 +195,44 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
     s
 }
 
-fn user_prompt(date: &str, time: &str, text: &str) -> String {
-    format!(
+fn user_prompt(date: &str, time: &str, text: &str, has_images: bool) -> String {
+    let mut s = format!(
         "Triage this capture from {date} at {time}. Split it into discrete entries and route each \
          one. Return JSON only.\n\n<raw>\n{}\n</raw>",
         text.trim()
-    )
+    );
+    if has_images {
+        s.push_str(
+            "\n\nAttached images are included above this message. Read them for context — error \
+             screenshots, whiteboards, receipts, etc. — when deciding scope, kind, and routing.",
+        );
+    }
+    s
+}
+
+#[derive(Clone)]
+struct AttachmentImage {
+    mime: String,
+    b64: String,
+}
+
+fn load_attachment_images(
+    vault: &std::path::Path,
+    text: &str,
+) -> Result<Vec<AttachmentImage>> {
+    let mut out = Vec::new();
+    for rel in crate::vault::extract_attachment_refs(text) {
+        let bytes = crate::vault::read_attachment_bytes(vault, &rel)?;
+        // Skip huge images — vision APIs bill per pixel and 4MB is plenty for a screenshot.
+        if bytes.len() > 4 * 1024 * 1024 {
+            continue;
+        }
+        out.push(AttachmentImage {
+            mime: crate::vault::attachment_mime(&rel),
+            b64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes),
+        });
+    }
+    Ok(out)
 }
 
 pub struct TriageRequest<'a> {
@@ -211,6 +243,7 @@ pub struct TriageRequest<'a> {
     pub date: &'a str,
     pub time: &'a str,
     pub text: &'a str,
+    pub vault: &'a std::path::Path,
     pub projects: &'a [ProjectMeta],
     pub glossary: &'a [String],
     pub profile: &'a str,
@@ -229,10 +262,12 @@ pub async fn triage_item(req: TriageRequest<'_>) -> Result<TriageResult> {
         bail!("Nothing to triage: capture is empty.");
     }
 
+    let images = load_attachment_images(req.vault, req.text).unwrap_or_default();
+
     let json_text = match req.provider {
-        "deepseek" => call_openai_compatible(&req, DEEPSEEK_URL, false).await?,
-        "anthropic" => call_anthropic(&req).await?,
-        _ => call_openai_compatible(&req, OPENAI_URL, true).await?,
+        "deepseek" => call_openai_compatible(&req, DEEPSEEK_URL, false, &images).await?,
+        "anthropic" => call_anthropic(&req, &images).await?,
+        _ => call_openai_compatible(&req, OPENAI_URL, true, &images).await?,
     };
 
     parse_triage_json(&json_text)
@@ -284,7 +319,21 @@ fn parse_triage_json(json_text: &str) -> Result<TriageResult> {
     Ok(normalize_result(result))
 }
 
-async fn call_anthropic(req: &TriageRequest<'_>) -> Result<String> {
+async fn call_anthropic(req: &TriageRequest<'_>, images: &[AttachmentImage]) -> Result<String> {
+    let user_text = user_prompt(req.date, req.time, req.text, !images.is_empty());
+    let mut user_content: Vec<serde_json::Value> = Vec::new();
+    for img in images {
+        user_content.push(json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img.mime,
+                "data": img.b64
+            }
+        }));
+    }
+    user_content.push(json!({ "type": "text", "text": user_text }));
+
     let body = json!({
         "model": req.model,
         "max_tokens": 8000,
@@ -294,7 +343,7 @@ async fn call_anthropic(req: &TriageRequest<'_>) -> Result<String> {
             "format": { "type": "json_schema", "schema": triage_schema() }
         },
         "messages": [
-            { "role": "user", "content": user_prompt(req.date, req.time, req.text) }
+            { "role": "user", "content": user_content }
         ]
     });
 
@@ -350,9 +399,26 @@ async fn call_openai_compatible(
     req: &TriageRequest<'_>,
     url: &str,
     strict_schema: bool,
+    images: &[AttachmentImage],
 ) -> Result<String> {
     let system = system_prompt(req.projects, req.glossary, req.profile);
-    let user = user_prompt(req.date, req.time, req.text);
+    let user_text = user_prompt(req.date, req.time, req.text, !images.is_empty());
+
+    let user_content = if images.is_empty() || !strict_schema {
+        // DeepSeek does not get vision in this path; text-only.
+        json!(user_text)
+    } else {
+        let mut parts = vec![json!({ "type": "text", "text": user_text })];
+        for img in images {
+            parts.push(json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": format!("data:{};base64,{}", img.mime, img.b64)
+                }
+            }));
+        }
+        json!(parts)
+    };
 
     let response_format = if strict_schema {
         json!({
@@ -372,7 +438,7 @@ async fn call_openai_compatible(
         "max_tokens": 8000,
         "messages": [
             { "role": "system", "content": system },
-            { "role": "user", "content": user }
+            { "role": "user", "content": user_content }
         ],
         "response_format": response_format
     });

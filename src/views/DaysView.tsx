@@ -10,11 +10,12 @@ import Markdown from "../Markdown";
 
 type Props = {
   days: DayEntry[];
+  vaultPath: string;
   onChanged: () => void;
   onError: (msg: string) => void;
 };
 
-export default function DaysView({ days, onChanged, onError }: Props) {
+export default function DaysView({ days, vaultPath, onChanged, onError }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<DayContent | null>(null);
   const [pane, setPane] = useState<"note" | "raw">("note");
@@ -171,7 +172,7 @@ export default function DaysView({ days, onChanged, onError }: Props) {
 
             <div className="content">
               {pane === "note" ? (
-                <Markdown text={content.note} />
+                <Markdown text={content.note} vaultPath={vaultPath} />
               ) : editing !== null ? (
                 <textarea
                   className="rawedit"

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type DayEntry, type Settings } from "./api";
 import DaysView from "./views/DaysView";
+import IdeasView from "./views/IdeasView";
 import InboxView from "./views/InboxView";
 import ProjectsView from "./views/ProjectsView";
 import SearchView from "./views/SearchView";
 import SettingsView from "./views/SettingsView";
+import TasksView from "./views/TasksView";
 
-type Tab = "inbox" | "days" | "projects" | "search" | "settings";
+type Tab = "inbox" | "days" | "projects" | "tasks" | "ideas" | "search" | "settings";
 
 function hasProviderKey(s: Settings): boolean {
   switch (s.provider) {
@@ -39,7 +41,7 @@ export default function App() {
       const items = await api.listInbox();
       setInboxCount(items.length);
     } catch {
-      /* ignore — vault may not exist yet */
+      /* vault may not exist yet */
     }
   }, []);
 
@@ -59,16 +61,22 @@ export default function App() {
   }, [refreshDays, refreshInbox]);
 
   const needsKey = settings && !hasProviderKey(settings);
+  const vaultPath = settings?.vault_path ?? "";
 
   return (
     <div className="shell">
       <nav className="sidebar">
         <div className="brand">Daybook</div>
+        <button className="btn primary capture-btn" onClick={() => api.showCapture()}>
+          New entry
+        </button>
         {(
           [
             ["inbox", inboxCount ? `Inbox (${inboxCount})` : "Inbox"],
             ["days", "Days"],
             ["projects", "Projects"],
+            ["tasks", "Tasks"],
+            ["ideas", "Ideas"],
             ["search", "Search"],
             ["settings", "Settings"],
           ] as [Tab, string][]
@@ -110,6 +118,7 @@ export default function App() {
 
         {tab === "inbox" && (
           <InboxView
+            vaultPath={vaultPath}
             onChanged={() => {
               refreshDays();
               refreshInbox();
@@ -118,9 +127,20 @@ export default function App() {
           />
         )}
         {tab === "days" && (
-          <DaysView days={days} onChanged={refreshDays} onError={setBanner} />
+          <DaysView
+            days={days}
+            vaultPath={vaultPath}
+            onChanged={refreshDays}
+            onError={setBanner}
+          />
         )}
-        {tab === "projects" && <ProjectsView onError={setBanner} />}
+        {tab === "projects" && (
+          <ProjectsView vaultPath={vaultPath} onError={setBanner} />
+        )}
+        {tab === "tasks" && <TasksView onError={setBanner} />}
+        {tab === "ideas" && (
+          <IdeasView vaultPath={vaultPath} onError={setBanner} />
+        )}
         {tab === "search" && <SearchView onError={setBanner} />}
         {tab === "settings" && settings && (
           <SettingsView

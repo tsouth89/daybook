@@ -83,6 +83,7 @@ export const api = {
   saveAttachment: (dataBase64: string, ext: string) =>
     invoke<string>("save_attachment", { dataBase64, ext }),
   hideCapture: () => invoke<void>("hide_capture"),
+  showCapture: () => invoke<void>("show_capture"),
 
   listDays: () => invoke<DayEntry[]>("list_days"),
   readDay: (date: string) => invoke<DayContent>("read_day", { date }),
@@ -106,6 +107,9 @@ export const api = {
   saveProfile: (text: string) => invoke<void>("save_profile", { text }),
 
   revealVault: () => invoke<void>("reveal_vault"),
+  readTasks: () => invoke<string>("read_tasks"),
+  readIdeas: () => invoke<string>("read_ideas"),
+  toggleTaskLine: (line: number) => invoke<string>("toggle_task_line", { line }),
   processInbox: (date?: string) =>
     invoke<InboxProcessResult>("process_inbox", { date: date ?? null }),
   processDay: (date: string) => invoke<InboxProcessResult>("process_day", { date }),

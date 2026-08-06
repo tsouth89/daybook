@@ -1,0 +1,104 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, errText } from "../api";
+
+type Props = {
+  onError: (m: string) => void;
+};
+
+type TaskLine = {
+  line: number;
+  done: boolean;
+  text: string;
+};
+
+function parseTasks(md: string): TaskLine[] {
+  const out: TaskLine[] = [];
+  md.split("\n").forEach((raw, i) => {
+    const line = i + 1;
+    const open = raw.match(/^- \[ \] (.+)/);
+    const done = raw.match(/^- \[[xX]\] (.+)/);
+    if (open) out.push({ line, done: false, text: open[1] });
+    else if (done) out.push({ line, done: true, text: done[1] });
+  });
+  return out;
+}
+
+export default function TasksView({ onError }: Props) {
+  const [body, setBody] = useState("");
+  const tasks = parseTasks(body);
+  const open = tasks.filter((t) => !t.done);
+  const done = tasks.filter((t) => t.done);
+
+  const refresh = useCallback(async () => {
+    try {
+      setBody(await api.readTasks());
+    } catch (e) {
+      onError(errText(e));
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  async function toggle(line: number) {
+    try {
+      setBody(await api.toggleTaskLine(line));
+    } catch (e) {
+      onError(errText(e));
+    }
+  }
+
+  if (!tasks.length) {
+    return (
+      <div className="empty">
+        <h2>No tasks yet</h2>
+        <p className="dim">
+          Tasks appear when triage routes a capture as a task — appointments, reminders, things to
+          do.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="content tasks-view">
+      {open.length > 0 && (
+        <section>
+          <h3 className="section-label">Open ({open.length})</h3>
+          <ul className="tasklist">
+            {open.map((t) => (
+              <li key={t.line}>
+                <label>
+                  <input type="checkbox" checked={false} onChange={() => toggle(t.line)} />
+                  <span>{t.text}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {done.length > 0 && (
+        <section>
+          <h3 className="section-label dim">Done ({done.length})</h3>
+          <ul className="tasklist done">
+            {done.map((t) => (
+              <li key={t.line}>
+                <label>
+                  <input type="checkbox" checked onChange={() => toggle(t.line)} />
+                  <span>{t.text}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
