@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 export type AppTab =
+  | "today"
   | "inbox"
   | "days"
   | "personal"
@@ -57,6 +58,27 @@ export function pathToNav(path: string): NavTarget | null {
   const area = p.match(/^areas\/([^/]+)$/);
   if (area) return { type: "entity", kind: "area", slug: area[1] };
 
+  return null;
+}
+
+/**
+ * Map a process-result destination label (`project/daybook`, `personal`,
+ * `task (work)`, `note (personal)`) to somewhere in the app. `date` is the
+ * processed item's day, used for destinations that only land in a day note.
+ */
+export function destinationToNav(dest: string, date?: string): NavTarget | null {
+  const d = dest.trim().toLowerCase();
+  if (!d) return null;
+
+  const entity = d.match(/^(project|area)\/([^/\s]+)$/);
+  if (entity) {
+    return { type: "entity", kind: entity[1] as "project" | "area", slug: entity[2] };
+  }
+  if (d.startsWith("personal")) return { type: "tab", tab: "personal" };
+  if (d.startsWith("task")) return { type: "tab", tab: "tasks" };
+  if (d.startsWith("idea")) return { type: "tab", tab: "ideas" };
+  // Plain notes only exist in the day note.
+  if (d.startsWith("note") && date) return { type: "day", date, pane: "note" };
   return null;
 }
 

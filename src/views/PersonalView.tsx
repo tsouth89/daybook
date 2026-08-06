@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText } from "../api";
+import Backlinks from "../Backlinks";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import Markdown from "../Markdown";
 import NoteEditor from "../NoteEditor";
+import { useViewHandlers } from "../viewhost";
 
 type Props = {
   vaultPath: string;
@@ -36,6 +38,8 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh, editing]);
+
+  useViewHandlers({ isDirty: () => editing !== null && dirty });
 
   async function save() {
     if (editing === null) return;
@@ -155,15 +159,18 @@ export default function PersonalView({ vaultPath, onError, onNotice }: Props) {
             onSave={() => void save()}
           />
         ) : hasContent ? (
-          <Markdown
-            text={body}
-            vaultPath={vaultPath}
-            onEdit={() => {
-              setEditing(body);
-              setDirty(false);
-            }}
-            extraMenu={pageMenu.filter((i) => i.kind === "sep" || i.label !== "Edit")}
-          />
+          <>
+            <Markdown
+              text={body}
+              vaultPath={vaultPath}
+              onEdit={() => {
+                setEditing(body);
+                setDirty(false);
+              }}
+              extraMenu={pageMenu.filter((i) => i.kind === "sep" || i.label !== "Edit")}
+            />
+            <Backlinks target="personal" onError={onError} />
+          </>
         ) : (
           <div className="empty" style={{ padding: 0 }}>
             <h2>No personal entries yet</h2>

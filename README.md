@@ -54,12 +54,40 @@ A failed triage leaves the item sitting in the inbox.
 
 - **Capture**: `Ctrl+Shift+Space` opens the overlay. Dictate, `Ctrl+Enter` to save,
   `Esc` to dismiss. Images paste straight in. Text stays in the box if a save fails.
+- **Today**: where the app opens. Today's note, what is still waiting in the inbox for
+  today, and one button to file it. The sidebar badge is today's pending count.
 - **Inbox**: review pending captures, then Process. One dump that mentions a bug fix,
-  a dentist appointment, and a side idea becomes three routed entries.
+  a dentist appointment, and a side idea becomes three routed entries. Captures are
+  editable before processing — fix a mangled word instead of discarding and redictating.
 - **Days / Projects**: read what was filed. Projects and areas share one list; filter
-  by kind or scope.
+  by kind or scope. Each page lists what links to it under "Linked from".
 - **Tune**: glossary first (dictation mangles proper nouns), then aliases, then the
   profile. Those three beat any model upgrade.
+
+### Keyboard
+
+In-app shortcuts, ignored while you are typing in an editor or input:
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+T` | Today |
+| `Ctrl+Shift+I` | Inbox |
+| `Ctrl+Shift+D` | Days |
+| `Ctrl+Shift+J` | Projects |
+| `Ctrl+Shift+F` | Search |
+| `Ctrl+Shift+E` | New entry |
+| `Ctrl+Shift+P` | Process the current view's pending items |
+| `Ctrl+S` | Save the open editor |
+
+### Editing by hand
+
+Day notes, project pages, areas, and `personal.md` are all safe to edit directly —
+in the app or in Obsidian. Processing a new capture splices that item's section into
+the day note rather than regenerating the file, so headings, prose, and bullets you
+wrote yourself survive. The same holds for the `## Overview` block on a project, area,
+or personal page: it is only rewritten when you ask for **Refresh summary**.
+
+`raw/` is the exception. It is append-only and the app warns before letting you edit it.
 
 ## Cost
 

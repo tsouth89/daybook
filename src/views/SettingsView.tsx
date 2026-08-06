@@ -142,6 +142,41 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
       </section>
 
       <section>
+        <h3>Keyboard</h3>
+        <p className="dim tiny">
+          The capture hotkey above is global. These work inside the app, except while you are typing
+          in an editor or input.
+        </p>
+        <ul className="dim tiny shortcut-list">
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd> — Today
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> — Inbox
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> — Days
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>J</kbd> — Projects
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> — Search
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> — New entry
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> — Process pending items in the current
+            view (Inbox processes everything; Today and Days process that day)
+          </li>
+          <li>
+            <kbd>Ctrl</kbd>+<kbd>S</kbd> — Save the open editor
+          </li>
+        </ul>
+      </section>
+
+      <section>
         <h3>Date & time</h3>
         <label>
           <span>Date format</span>

@@ -148,7 +148,6 @@ pub fn personal_path(v: &Path) -> PathBuf {
     v.join("personal.md")
 }
 
-#[allow(dead_code)]
 pub fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
@@ -242,6 +241,42 @@ pub fn delete_inbox_item(v: &Path, id: &str) -> Result<()> {
         std::fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+/// Rewrite the body of an inbox item; keeps id / frontmatter capture stamp.
+pub fn update_inbox_item(v: &Path, id: &str, text: &str) -> Result<()> {
+    ensure_vault(v)?;
+    let id = sanitize_id(id);
+    let path = inbox_dir(v).join(format!("{id}.md"));
+    if !path.exists() {
+        anyhow::bail!("Inbox item not found: {id}");
+    }
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let captured = existing
+        .lines()
+        .find_map(|l| l.strip_prefix("captured: ").map(|s| s.trim().to_string()))
+        .unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M:%S").to_string());
+    let body = format!(
+        "---\ncaptured: {captured}\n---\n\n{}\n",
+        text.trim()
+    );
+    std::fs::write(&path, body)?;
+    Ok(())
+}
+
+/// Ensure a day note file exists (empty scaffold) so Today always has somewhere to land.
+pub fn ensure_day(v: &Path, date: &str, date_fmt: &str) -> Result<String> {
+    valid_date(date)?;
+    ensure_vault(v)?;
+    let path = days_dir(v).join(format!("{date}.md"));
+    if !path.exists() {
+        let display = crate::datetime::format_date(date, date_fmt);
+        let body = format!(
+            "---\ndate: {date}\ntype: daily\n---\n\n# {display}\n\n## At a glance\n\n- _(nothing filed yet)_\n\n---\n\nRaw: [[raw/{date}]]\n"
+        );
+        std::fs::write(&path, body)?;
+    }
+    Ok(std::fs::read_to_string(&path)?)
 }
 
 fn sanitize_id(id: &str) -> String {
@@ -567,6 +602,11 @@ pub fn upsert_entity_day(
     }
     by_date.sort_by(|a, b| b.0.cmp(&a.0));
 
+    // Preserve existing Overview body; only Refresh summary / AI refresh rewrites it.
+    let overview_body = extract_overview_body(&existing).unwrap_or_else(|| {
+        "Standing view of recent activity. Full dated log is below.\n".into()
+    });
+
     let mut out = String::new();
     out.push_str("---\n");
     out.push_str(&format!("slug: {slug}\n"));
@@ -576,29 +616,8 @@ pub fn upsert_entity_day(
     out.push_str("---\n\n");
     out.push_str(&format!("# {name}\n\n"));
     out.push_str("## Overview\n\n");
-    out.push_str("Standing view of recent activity. Full dated log is below.\n\n");
-    let mut overview_lines = 0usize;
-    for (d, items) in &by_date {
-        let d_disp = crate::datetime::format_date(d, date_fmt);
-        for (_id, b) in items {
-            let title = overview_title_from_body(b);
-            if title.is_empty() {
-                continue;
-            }
-            out.push_str(&format!("- **{d_disp}**: {title}\n"));
-            overview_lines += 1;
-            if overview_lines >= 8 {
-                break;
-            }
-        }
-        if overview_lines >= 8 {
-            break;
-        }
-    }
-    if overview_lines == 0 {
-        out.push_str("- _(nothing filed yet)_\n");
-    }
-    out.push('\n');
+    out.push_str(overview_body.trim_end());
+    out.push_str("\n\n");
 
     for (d, items) in by_date {
         let d_disp = crate::datetime::format_date(&d, date_fmt);
@@ -622,23 +641,27 @@ pub fn upsert_entity_day(
     Ok(())
 }
 
-fn overview_title_from_body(body: &str) -> String {
-    for line in body.lines() {
-        let t = line.trim();
-        if t.is_empty() {
+fn extract_overview_body(content: &str) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut start = None;
+    let mut end = lines.len();
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() == "## Overview" {
+            start = Some(i + 1);
             continue;
         }
-        if let Some(rest) = t.strip_prefix("**").and_then(|s| s.strip_suffix("**")) {
-            return rest.trim().chars().take(100).collect();
-        }
-        if t.starts_with("**") && t.ends_with("**") {
-            return t.trim_matches('*').trim().chars().take(100).collect();
-        }
-        if !t.starts_with('#') && !t.starts_with("![") && !t.starts_with("[[") {
-            return t.trim_start_matches(['*', '-', '#', ' ']).chars().take(100).collect();
+        if start.is_some() && line.starts_with("## ") {
+            end = i;
+            break;
         }
     }
-    String::new()
+    let s = start?;
+    let body = lines[s..end].join("\n").trim().to_string();
+    if body.is_empty() {
+        None
+    } else {
+        Some(body)
+    }
 }
 
 /// Replace the ## Overview section body. Creates the section if missing.
@@ -960,8 +983,8 @@ pub fn append_task(
     Ok(())
 }
 
-/// Upsert one capture's section in the day note. Day notes are a view over
-/// routed entries; each inbox item owns a section keyed by its id.
+/// Upsert one capture's section in the day note by splicing — freeform content
+/// outside this item's glance line(s) and `## … · \`{id}\` ·` section is preserved.
 pub fn upsert_day_item(
     v: &Path,
     date: &str,
@@ -978,88 +1001,189 @@ pub fn upsert_day_item(
     let path = days_dir(v).join(format!("{date}.md"));
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
 
-    let mut glances: Vec<(String, String)> = Vec::new();
-    let mut sections: Vec<(String, String, String, String)> = Vec::new();
-    let mut cur: Option<(String, String, String, String)> = None;
+    let title = title.trim();
+    let title = if title.is_empty() { "Entry" } else { title };
+    let title: String = title.chars().take(80).collect();
+    let display_time = crate::datetime::format_time(time, time_fmt);
+    let display_date = crate::datetime::format_date(date, date_fmt);
 
-    for line in existing.lines() {
-        if let Some(rest) = line.strip_prefix("- <!-- item:") {
-            if let Some((id, rest)) = rest.split_once(" --> ") {
-                glances.push((id.trim().to_string(), rest.to_string()));
-            }
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("## ") {
-            if let Some((t, rest)) = rest.split_once(" · ") {
-                let section_time = t.trim().to_string();
-                if let Some((id_bit, section_title)) = rest.split_once(" · ") {
-                    let id = id_bit.trim().trim_matches('`').to_string();
-                    if let Some(prev) = cur.take() {
-                        sections.push(prev);
-                    }
-                    cur = Some((
-                        id,
-                        section_time,
-                        section_title.trim().to_string(),
-                        String::new(),
-                    ));
-                    continue;
-                }
-            }
-        }
-        if let Some(ref mut c) = cur {
-            c.3.push_str(line);
-            c.3.push('\n');
-        }
-    }
-    if let Some(prev) = cur.take() {
-        sections.push(prev);
-    }
-
-    glances.retain(|(id, _)| id != item_id);
+    let mut glance_lines = String::new();
     for b in summary_bullets {
         let t = b.trim();
         if !t.is_empty() {
-            glances.push((item_id.to_string(), t.to_string()));
+            glance_lines.push_str(&format!("- <!-- item:{item_id} --> {t}\n"));
         }
     }
 
-    sections.retain(|(id, _, _, _)| id != item_id);
-    let title = title.trim();
-    let title = if title.is_empty() { "Entry" } else { title };
-    let display_time = crate::datetime::format_time(time, time_fmt);
-    sections.push((
-        item_id.to_string(),
-        display_time,
-        title.chars().take(80).collect(),
-        body.trim().to_string(),
-    ));
-    sections.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut section = format!("## {display_time} · `{item_id}` · {title}\n\n");
+    let body = body.trim();
+    if !body.is_empty() {
+        section.push_str(body);
+        section.push_str("\n\n");
+    }
 
-    let display_date = crate::datetime::format_date(date, date_fmt);
-    let mut out = String::new();
-    out.push_str("---\n");
-    out.push_str(&format!("date: {date}\n"));
-    out.push_str("type: daily\n");
-    out.push_str("---\n\n");
-    out.push_str(&format!("# {display_date}\n\n"));
-    if !glances.is_empty() {
+    if existing.trim().is_empty() {
+        let mut out = String::new();
+        out.push_str("---\n");
+        out.push_str(&format!("date: {date}\n"));
+        out.push_str("type: daily\n");
+        out.push_str("---\n\n");
+        out.push_str(&format!("# {display_date}\n\n"));
         out.push_str("## At a glance\n\n");
-        for (id, text) in &glances {
-            out.push_str(&format!("- <!-- item:{id} --> {text}\n"));
+        if glance_lines.is_empty() {
+            out.push_str(&format!("- <!-- item:{item_id} --> {title}\n"));
+        } else {
+            out.push_str(&glance_lines);
         }
         out.push('\n');
+        out.push_str(&section);
+        out.push_str(&format!("---\n\nRaw: [[raw/{date}]]\n"));
+        std::fs::write(&path, out)?;
+        return Ok(());
     }
-    for (id, t, section_title, b) in &sections {
-        out.push_str(&format!("## {t} · `{id}` · {section_title}\n\n"));
-        if !b.is_empty() {
-            out.push_str(b);
-            out.push_str("\n\n");
+
+    let next = splice_day_item(&existing, item_id, &glance_lines, &section, date, &display_date);
+    std::fs::write(&path, next)?;
+    Ok(())
+}
+
+fn is_day_item_heading(line: &str, item_id: &str) -> bool {
+    let Some(rest) = line.strip_prefix("## ") else {
+        return false;
+    };
+    let Some((_, rest)) = rest.split_once(" · ") else {
+        return false;
+    };
+    let Some((id_bit, _)) = rest.split_once(" · ") else {
+        return false;
+    };
+    id_bit.trim().trim_matches('`') == item_id
+}
+
+fn is_raw_footer_sep(line: &str, next: Option<&str>) -> bool {
+    line.trim() == "---" && next.is_some_and(|n| n.trim().starts_with("Raw:"))
+}
+
+/// Remove this item's glance lines + section, then re-insert updated ones.
+fn splice_day_item(
+    existing: &str,
+    item_id: &str,
+    glance_lines: &str,
+    section: &str,
+    iso_date: &str,
+    display_date: &str,
+) -> String {
+    let glance_prefix = format!("- <!-- item:{item_id} -->");
+    let lines: Vec<&str> = existing.lines().collect();
+    let mut kept: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim_start().starts_with(&glance_prefix) {
+            i += 1;
+            continue;
+        }
+        if is_day_item_heading(line, item_id) {
+            i += 1;
+            while i < lines.len() {
+                let l = lines[i];
+                let next = lines.get(i + 1).copied();
+                if l.starts_with("## ") || is_raw_footer_sep(l, next) {
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        kept.push(line.to_string());
+        i += 1;
+    }
+
+    while kept.last().is_some_and(|l| l.trim().is_empty()) {
+        kept.pop();
+    }
+
+    let has_title = kept.iter().any(|l| l.starts_with("# "));
+    if !has_title {
+        let mut insert_at = 0;
+        if kept.first().map(|s| s.trim() == "---").unwrap_or(false) {
+            insert_at = kept
+                .iter()
+                .skip(1)
+                .position(|l| l.trim() == "---")
+                .map(|p| p + 2)
+                .unwrap_or(0);
+        }
+        kept.insert(insert_at, String::new());
+        kept.insert(insert_at, format!("# {display_date}"));
+    }
+
+    let glance_idx = kept.iter().position(|l| l.trim() == "## At a glance");
+    let glance_idx = if let Some(idx) = glance_idx {
+        idx
+    } else if let Some(title_idx) = kept.iter().position(|l| l.starts_with("# ")) {
+        let mut at = title_idx + 1;
+        while at < kept.len() && kept[at].trim().is_empty() {
+            at += 1;
+        }
+        kept.insert(at, String::new());
+        kept.insert(at, "## At a glance".into());
+        at
+    } else {
+        kept.push("## At a glance".into());
+        kept.len() - 1
+    };
+
+    let mut insert_glances_at = glance_idx + 1;
+    if insert_glances_at < kept.len() && kept[insert_glances_at].trim().is_empty() {
+        insert_glances_at += 1;
+    }
+    let glances_to_add: Vec<String> = glance_lines
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    for (n, g) in glances_to_add.iter().enumerate() {
+        kept.insert(insert_glances_at + n, g.clone());
+    }
+
+    let mut footer_at = kept.len();
+    for (idx, line) in kept.iter().enumerate() {
+        if line.trim().starts_with("Raw: [[raw/") {
+            if idx > 0 && kept[idx - 1].trim() == "---" {
+                footer_at = idx - 1;
+            } else {
+                footer_at = idx;
+            }
+            break;
         }
     }
-    out.push_str(&format!("---\n\nRaw: [[raw/{date}]]\n"));
-    std::fs::write(&path, out)?;
-    Ok(())
+
+    while footer_at > 0 && kept[footer_at - 1].trim().is_empty() {
+        footer_at -= 1;
+        kept.remove(footer_at);
+    }
+    let mut section_lines: Vec<String> = vec![String::new()];
+    for l in section.lines() {
+        section_lines.push(l.to_string());
+    }
+    for (n, l) in section_lines.iter().enumerate() {
+        kept.insert(footer_at + n, l.clone());
+    }
+
+    let has_raw = kept.iter().any(|l| l.trim().starts_with("Raw: [[raw/"));
+    if !has_raw {
+        kept.push(String::new());
+        kept.push("---".into());
+        kept.push(String::new());
+        kept.push(format!("Raw: [[raw/{iso_date}]]"));
+    }
+
+    let mut out = kept.join("\n");
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 // -------------------------------------------------------------- attachments
@@ -1179,7 +1303,8 @@ pub fn clear_personal_item(v: &Path, item_id: &str, date_fmt: &str) -> Result<()
     }
     by_date.retain(|(_, items)| !items.is_empty());
     by_date.sort_by(|a, b| b.0.cmp(&a.0));
-    std::fs::write(&path, render_personal_document(&by_date, date_fmt))?;
+    let overview = extract_overview_body(&existing);
+    std::fs::write(&path, render_personal_document(&by_date, date_fmt, overview.as_deref()))?;
     Ok(())
 }
 
@@ -1245,6 +1370,7 @@ fn parse_personal_by_date(
 fn render_personal_document(
     by_date: &[(String, Vec<(String, String, String, String, String)>)],
     date_fmt: &str,
+    overview_body: Option<&str>,
 ) -> String {
     let mut out = String::new();
     out.push_str(
@@ -1254,25 +1380,9 @@ fn render_personal_document(
          project page.\n\n",
     );
     out.push_str("## Overview\n\n");
-    out.push_str("Standing view of personal life threads. Dated log is below.\n\n");
-    let mut overview_lines = 0usize;
-    for (d, items) in by_date {
-        let d_disp = crate::datetime::format_date(d, date_fmt);
-        for (_id, _t, tit, dest, _b) in items {
-            out.push_str(&format!("- **{d_disp}**: {tit} · {dest}\n"));
-            overview_lines += 1;
-            if overview_lines >= 8 {
-                break;
-            }
-        }
-        if overview_lines >= 8 {
-            break;
-        }
-    }
-    if overview_lines == 0 {
-        out.push_str("- _(nothing filed yet)_\n");
-    }
-    out.push('\n');
+    let overview = overview_body.unwrap_or("Standing view of personal life threads. Dated log is below.");
+    out.push_str(overview.trim_end());
+    out.push_str("\n\n");
     for (d, items) in by_date {
         let d_disp = crate::datetime::format_date(d, date_fmt);
         out.push_str(&format!("## {d_disp}\n\n"));
@@ -1336,7 +1446,8 @@ pub fn upsert_personal_item(
         by_date.push((date.to_string(), vec![entry]));
     }
     by_date.sort_by(|a, b| b.0.cmp(&a.0));
-    std::fs::write(&path, render_personal_document(&by_date, date_fmt))?;
+    let overview = extract_overview_body(&existing);
+    std::fs::write(&path, render_personal_document(&by_date, date_fmt, overview.as_deref()))?;
     Ok(())
 }
 
@@ -1515,6 +1626,105 @@ pub struct SearchHit {
     pub text: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct Backlink {
+    /// Vault-relative path of the file that links here, e.g. `days/2026-08-06.md`.
+    pub path: String,
+    pub kind: String,
+    pub line: usize,
+    pub text: String,
+}
+
+/// Normalize a wikilink target or a vault-relative path to a comparable key:
+/// lowercase, forward slashes, no `.md`, no leading `./` or `/`.
+fn link_key(s: &str) -> String {
+    s.trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .trim_end_matches(".md")
+        .to_lowercase()
+}
+
+/// Pull the target out of every `[[…]]` on a line, dropping `|alias` and `#anchor`.
+fn wikilink_targets(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let rest = &line[i + 2..];
+            if let Some(end) = rest.find("]]") {
+                let inner = &rest[..end];
+                let inner = inner.split('|').next().unwrap_or(inner);
+                let inner = inner.split('#').next().unwrap_or(inner);
+                if !inner.trim().is_empty() {
+                    out.push(link_key(inner));
+                }
+                i += 2 + end + 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Every line in the vault that wikilinks to `target` (e.g. `projects/daybook`,
+/// `days/2026-08-06`, `personal`). Obsidian's short form (`[[daybook]]`) counts too.
+pub fn list_backlinks(v: &Path, target: &str, limit: usize) -> Result<Vec<Backlink>> {
+    let want = link_key(target);
+    if want.is_empty() {
+        return Ok(vec![]);
+    }
+    let short = want.rsplit('/').next().unwrap_or(&want).to_string();
+
+    let mut out = Vec::new();
+    for entry in walkdir::WalkDir::new(v)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+    {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(v)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let kind = rel.split('/').next().unwrap_or("").to_string();
+        // inbox/ is untriaged text, not part of the graph yet.
+        if kind == "config" || kind == "inbox" || link_key(&rel) == want {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        if !text.contains("[[") {
+            continue;
+        }
+        for (i, line) in text.lines().enumerate() {
+            if wikilink_targets(line)
+                .iter()
+                .any(|t| *t == want || *t == short)
+            {
+                out.push(Backlink {
+                    path: rel.clone(),
+                    kind: kind.clone(),
+                    line: i + 1,
+                    text: line.trim().chars().take(300).collect(),
+                });
+                if out.len() >= limit {
+                    return Ok(out);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub fn search(v: &Path, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
@@ -1560,4 +1770,104 @@ pub fn search(v: &Path, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
         }
     }
     Ok(hits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HAND_EDITED: &str = "\
+---
+date: 2026-08-06
+type: daily
+---
+
+# 06/08/2026
+
+## At a glance
+
+- <!-- item:cap-1 --> Shipped the splice fix
+- A bullet I typed myself
+
+## Morning pages
+
+Freeform prose I wrote by hand, outside any item section.
+
+## 09:30 · `cap-1` · Shipped the splice fix
+
+Body of the first capture.
+
+---
+
+Raw: [[raw/2026-08-06]]
+";
+
+    fn splice(existing: &str, id: &str, glance: &str, section: &str) -> String {
+        splice_day_item(existing, id, glance, section, "2026-08-06", "06/08/2026")
+    }
+
+    #[test]
+    fn new_item_preserves_hand_written_content() {
+        let out = splice(
+            HAND_EDITED,
+            "cap-2",
+            "- <!-- item:cap-2 --> Booked the dentist\n",
+            "## 11:00 · `cap-2` · Booked the dentist\n\nBody of the second capture.\n\n",
+        );
+
+        // Everything the user wrote by hand survives.
+        assert!(out.contains("- A bullet I typed myself"));
+        assert!(out.contains("## Morning pages"));
+        assert!(out.contains("Freeform prose I wrote by hand, outside any item section."));
+        // The untouched item keeps its glance line and section.
+        assert!(out.contains("- <!-- item:cap-1 --> Shipped the splice fix"));
+        assert!(out.contains("## 09:30 · `cap-1` · Shipped the splice fix"));
+        assert!(out.contains("Body of the first capture."));
+        // The new item landed.
+        assert!(out.contains("- <!-- item:cap-2 --> Booked the dentist"));
+        assert!(out.contains("## 11:00 · `cap-2` · Booked the dentist"));
+        // Footer stays single and last.
+        assert_eq!(out.matches("Raw: [[raw/").count(), 1);
+        assert!(out.trim_end().ends_with("Raw: [[raw/2026-08-06]]"));
+    }
+
+    #[test]
+    fn reprocessing_an_item_replaces_it_without_duplicating() {
+        let out = splice(
+            HAND_EDITED,
+            "cap-1",
+            "- <!-- item:cap-1 --> Shipped the splice fix (revised)\n",
+            "## 09:30 · `cap-1` · Shipped the splice fix\n\nRevised body.\n\n",
+        );
+
+        assert_eq!(out.matches("<!-- item:cap-1 -->").count(), 1);
+        assert_eq!(out.matches("· `cap-1` ·").count(), 1);
+        assert!(out.contains("Revised body."));
+        assert!(!out.contains("Body of the first capture."));
+        // Hand-written content is still untouched.
+        assert!(out.contains("- A bullet I typed myself"));
+        assert!(out.contains("## Morning pages"));
+        assert!(out.contains("Freeform prose I wrote by hand, outside any item section."));
+    }
+
+    #[test]
+    fn overview_body_is_extracted_for_preservation() {
+        let page = "\
+# Daybook
+
+## Overview
+
+My own standing summary.
+Second line.
+
+## 06/08/2026
+
+- something dated
+";
+        assert_eq!(
+            extract_overview_body(page).as_deref(),
+            Some("My own standing summary.\nSecond line.")
+        );
+        assert_eq!(extract_overview_body("# No overview here\n"), None);
+    }
 }

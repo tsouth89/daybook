@@ -252,7 +252,42 @@ kbd {
   flex-direction: column;
 }
 
-.md .wiki-missing { color: var(--warn); text-decoration: underline dotted; }
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.chip {
+  display: inline-block;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 12px;
+  color: var(--dim);
+  font-family: inherit;
+}
+.chip.clickable { color: var(--accent); cursor: pointer; }
+.chip.clickable:hover { border-color: var(--accent); }
+
+.backlinks {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  max-width: 760px;
+}
+.backlink-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.backlink-list li {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
 
 .empty { padding: 60px 40px; max-width: 560px; }
 .empty h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
@@ -338,6 +373,8 @@ kbd {
 .settings label { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .settings label > span { width: 110px; flex-shrink: 0; font-size: 13px; }
 .settings p { margin: 4px 0 14px 122px; }
+.shortcut-list { list-style: none; padding: 0; margin: 4px 0 14px 122px; }
+.shortcut-list li { margin: 6px 0; }
 .tall { min-height: 140px; resize: vertical; }
 .projedit {
   display: grid; gap: 6px; padding: 10px;

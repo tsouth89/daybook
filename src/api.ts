@@ -71,6 +71,13 @@ export type SearchHit = {
   text: string;
 };
 
+export type Backlink = {
+  path: string;
+  kind: string;
+  line: number;
+  text: string;
+};
+
 export type ItemProcessResult = {
   id: string;
   date: string;
@@ -93,6 +100,13 @@ export const api = {
   appendEntry: (text: string) => invoke<string>("append_entry", { text }),
   listInbox: () => invoke<InboxItem[]>("list_inbox"),
   deleteInboxItem: (id: string) => invoke<void>("delete_inbox_item", { id }),
+  updateInboxItem: (id: string, text: string) =>
+    invoke<void>("update_inbox_item", { id, text }),
+  ensureDay: (date?: string) =>
+    invoke<string>("ensure_day", { date: date ?? null }),
+  todayDate: () => invoke<string>("today_date"),
+  listBacklinks: (target: string) =>
+    invoke<Backlink[]>("list_backlinks", { target }),
   saveAttachment: (dataBase64: string, ext: string) =>
     invoke<string>("save_attachment", { dataBase64, ext }),
   attachmentDataUrl: (rel: string) => invoke<string>("attachment_data_url", { rel }),

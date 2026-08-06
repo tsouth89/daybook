@@ -91,6 +91,32 @@ fn delete_inbox_item(state: tauri::State<AppState>, id: String) -> CmdResult<()>
 }
 
 #[tauri::command]
+fn update_inbox_item(state: tauri::State<AppState>, id: String, text: String) -> CmdResult<()> {
+    vault::update_inbox_item(&state.settings().vault(), &id, &text).map_err(err)
+}
+
+#[tauri::command]
+fn ensure_day(state: tauri::State<AppState>, date: Option<String>) -> CmdResult<String> {
+    let s = state.settings();
+    let date = date.unwrap_or_else(vault::today);
+    vault::ensure_day(&s.vault(), &date, &s.date_format).map_err(err)?;
+    Ok(date)
+}
+
+#[tauri::command]
+fn today_date() -> String {
+    vault::today()
+}
+
+#[tauri::command]
+fn list_backlinks(
+    state: tauri::State<AppState>,
+    target: String,
+) -> CmdResult<Vec<vault::Backlink>> {
+    vault::list_backlinks(&state.settings().vault(), &target, 80).map_err(err)
+}
+
+#[tauri::command]
 fn save_attachment(
     state: tauri::State<AppState>,
     data_base64: String,
@@ -892,6 +918,10 @@ pub fn run() {
             append_entry,
             list_inbox,
             delete_inbox_item,
+            update_inbox_item,
+            ensure_day,
+            today_date,
+            list_backlinks,
             save_attachment,
             attachment_data_url,
             hide_capture,

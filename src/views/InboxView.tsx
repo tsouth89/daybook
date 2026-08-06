@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  api,
-  errText,
-  type InboxItem,
-  type InboxProcessResult,
-} from "../api";
+import { api, errText, type InboxItem, type InboxProcessResult } from "../api";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
+import ProcessResult from "../ProcessResult";
+import { useViewHandlers } from "../viewhost";
+import NoteEditor from "../NoteEditor";
 
 type Props = {
   vaultPath: string;
@@ -28,6 +26,8 @@ export default function InboxView({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<InboxProcessResult | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
   const menu = useContextMenu();
   const fmt = useFormat();
 
@@ -49,14 +49,29 @@ export default function InboxView({
   }, [refresh]);
 
   useEffect(() => {
-    const onFocus = () => refresh();
+    const onFocus = () => {
+      if (editing === null) refresh();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
+  }, [refresh, editing]);
+
+  useEffect(() => {
+    setEditing(null);
+    setDirty(false);
+  }, [selected]);
 
   const current = items.find((i) => i.id === selected) ?? null;
 
+  useViewHandlers({
+    isDirty: () => editing !== null && dirty,
+    process: () => void processAll(),
+  });
+
   async function processAll() {
+    if (dirty && editing !== null && selected) {
+      await saveEdit();
+    }
     setBusy(true);
     setResult(null);
     try {
@@ -72,6 +87,9 @@ export default function InboxView({
   }
 
   async function processOne(id: string) {
+    if (dirty && editing !== null && selected === id) {
+      await saveEdit();
+    }
     setBusy(true);
     setResult(null);
     try {
@@ -83,6 +101,25 @@ export default function InboxView({
       onError(errText(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!selected || editing === null) return;
+    try {
+      await api.updateInboxItem(selected, editing);
+      setItems((prev) =>
+        prev.map((i) =>
+          i.id === selected
+            ? { ...i, text: editing, chars: editing.length }
+            : i
+        )
+      );
+      setDirty(false);
+      setEditing(null);
+      onNotice?.("Saved capture");
+    } catch (e) {
+      onError(errText(e));
     }
   }
 
@@ -100,6 +137,14 @@ export default function InboxView({
   function itemMenu(item: InboxItem) {
     return [
       {
+        label: "Edit",
+        onClick: () => {
+          setSelected(item.id);
+          setEditing(item.text);
+          setDirty(false);
+        },
+      },
+      {
         label: "Process this item",
         disabled: busy,
         onClick: () => void processOne(item.id),
@@ -109,13 +154,6 @@ export default function InboxView({
         onClick: () => {
           void copyText(item.text);
           onNotice?.("Copied capture text");
-        },
-      },
-      {
-        label: "Copy id",
-        onClick: () => {
-          void copyText(item.id);
-          onNotice?.("Copied id");
         },
       },
       { kind: "sep" as const },
@@ -138,8 +176,8 @@ export default function InboxView({
         <h2>Inbox empty</h2>
         <p className="dim">
           Captures land here first. Hit{" "}
-          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>, dump a thought, then
-          process when you want them filed.
+          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>, dump a thought, then process when you
+          want them filed.
         </p>
         <p className="dim" style={{ marginTop: 16 }}>
           <button className="btn primary" onClick={() => api.showCapture()}>
@@ -190,9 +228,7 @@ export default function InboxView({
             }}
           >
             <div className="row">
-              <span className="mono">
-                {fmt.dateTime(item.date, item.time)}
-              </span>
+              <span className="mono">{fmt.dateTime(item.date, item.time)}</span>
               <span className="pill pending">{item.chars}c</span>
             </div>
             <div className="preview dim">
@@ -204,65 +240,78 @@ export default function InboxView({
       </div>
 
       <div className="detail">
-        {result && (
-          <div className={`banner ${result.errors.length ? "warn" : "ok"}`}>
-            Processed {result.processed.length} item
-            {result.processed.length === 1 ? "" : "s"}
-            {result.processed.length > 0 && (
-              <>
-                :{" "}
-                {result.processed
-                  .map((p) => `${p.entry_count} entr${p.entry_count === 1 ? "y" : "ies"}`)
-                  .join(", ")}
-                .
-              </>
-            )}
-            {result.processed.some((p) => p.new_entities.length > 0) && (
-              <>
-                {" "}
-                New:{" "}
-                <strong>
-                  {[
-                    ...new Set(result.processed.flatMap((p) => p.new_entities)),
-                  ].join(", ")}
-                </strong>
-                .
-              </>
-            )}
-            {result.errors.length > 0 && (
-              <>
-                {" "}
-                {result.errors.length} failed (still in inbox):{" "}
-                {result.errors.join(" · ")}
-              </>
-            )}
-          </div>
-        )}
+        {result && <ProcessResult result={result} />}
 
         {current ? (
           <>
             <div className="toolbar">
               <div className="mono dim">
                 {fmt.dateTime(current.date, current.time)} · {current.id}
+                {dirty ? " · unsaved" : ""}
               </div>
               <div className="grow" />
-              <button
-                className="btn primary"
-                onClick={() => processOne(current.id)}
-                disabled={busy}
-              >
-                {busy ? "Processing…" : "Process"}
-              </button>
-              <button className="btn danger" onClick={() => setConfirmDiscard(current.id)}>
-                Discard
-              </button>
+              {editing === null ? (
+                <>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setEditing(current.text);
+                      setDirty(false);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="btn primary"
+                    onClick={() => processOne(current.id)}
+                    disabled={busy}
+                  >
+                    {busy ? "Processing…" : "Process"}
+                  </button>
+                  <button className="btn danger" onClick={() => setConfirmDiscard(current.id)}>
+                    Discard
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setEditing(null);
+                      setDirty(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button className="btn primary" onClick={() => void saveEdit()}>
+                    Save
+                  </button>
+                </>
+              )}
             </div>
-            <div className="content">
-              <Markdown
-                text={current.text}
-                vaultPath={vaultPath}
-                extraMenu={itemMenu(current)}
-              />
+            <div className={`content ${editing !== null ? "has-editor" : ""}`}>
+              {editing !== null ? (
+                <NoteEditor
+                  value={editing}
+                  onChange={(v) => {
+                    setEditing(v);
+                    setDirty(v !== current.text);
+                  }}
+                  vaultPath={vaultPath}
+                  onSave={() => void saveEdit()}
+                  initialMode="source"
+                />
+              ) : (
+                <Markdown
+                  text={current.text}
+                  vaultPath={vaultPath}
+                  onEdit={() => {
+                    setEditing(current.text);
+                    setDirty(false);
+                  }}
+                  extraMenu={itemMenu(current)}
+                />
+              )}
             </div>
           </>
         ) : (

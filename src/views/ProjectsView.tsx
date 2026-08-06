@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type ProjectEntry, type ProjectMeta } from "../api";
+import Backlinks from "../Backlinks";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
 import NoteEditor from "../NoteEditor";
+import { useViewHandlers } from "../viewhost";
 
 export default function ProjectsView({
   vaultPath,
@@ -74,6 +76,8 @@ export default function ProjectsView({
     api.readEntity(kind, slug).then(setBody).catch((e) => onError(errText(e)));
   }, [selected, onError]);
 
+  useViewHandlers({ isDirty: () => editing !== null && dirty });
+
   async function save() {
     if (!selected || editing === null) return;
     const [kind, slug] = selected.split(":");
@@ -140,6 +144,11 @@ export default function ProjectsView({
   function relPath(kind: string, slug: string) {
     return `${kind === "area" ? "areas" : "projects"}/${slug}.md`;
   }
+
+  // `[[projects/slug]]` / `[[areas/slug]]` — the same shape notes link to.
+  const backlinkTarget = selected
+    ? relPath(selected.split(":")[0], selected.split(":")[1]).replace(/\.md$/, "")
+    : null;
 
   function projectMenu(p: ProjectEntry) {
     const key = `${p.kind}:${p.slug}`;
@@ -414,6 +423,9 @@ export default function ProjectsView({
                       : undefined
                   }
                 />
+              )}
+              {editing === null && backlinkTarget && (
+                <Backlinks target={backlinkTarget} onError={onError} />
               )}
             </div>
           </>

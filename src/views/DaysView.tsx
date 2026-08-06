@@ -6,11 +6,14 @@ import {
   type DayEntry,
   type InboxProcessResult,
 } from "../api";
+import Backlinks from "../Backlinks";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
 import NoteEditor from "../NoteEditor";
+import ProcessResult from "../ProcessResult";
+import { useViewHandlers } from "../viewhost";
 
 type Props = {
   days: DayEntry[];
@@ -125,6 +128,11 @@ export default function DaysView({
       onError(errText(e));
     }
   }
+
+  useViewHandlers({
+    isDirty: () => editing !== null && dirty,
+    process: () => void process(),
+  });
 
   function startEditNote() {
     if (!content) return;
@@ -308,13 +316,7 @@ export default function DaysView({
               </button>
             </div>
 
-            {result && (
-              <div className={`banner ${result.errors.length ? "warn" : "ok"}`}>
-                Filed {result.processed.length} capture
-                {result.processed.length === 1 ? "" : "s"} for {selected}.
-                {result.errors.length > 0 && <> Failed: {result.errors.join(" · ")}</>}
-              </div>
-            )}
+            {result && <ProcessResult result={result} label="Filed" />}
 
             <div className={`content ${editing !== null && pane === "note" ? "has-editor" : ""}`}>
               {editing !== null && pane === "note" ? (
@@ -339,31 +341,34 @@ export default function DaysView({
                 />
               ) : pane === "note" ? (
                 content.note ? (
-                  <Markdown
-                    text={content.note}
-                    vaultPath={vaultPath}
-                    onEdit={startEditNote}
-                    extraMenu={
-                      selected
-                        ? [
-                            {
-                              label: "Reveal day note",
-                              onClick: () =>
-                                void api
-                                  .revealPath(`days/${selected}.md`)
-                                  .catch((e) => onError(errText(e))),
-                            },
-                            {
-                              label: "Copy date",
-                              onClick: () => {
-                                void copyText(fmt.date(selected));
-                                onNotice?.("Copied date");
+                  <>
+                    <Markdown
+                      text={content.note}
+                      vaultPath={vaultPath}
+                      onEdit={startEditNote}
+                      extraMenu={
+                        selected
+                          ? [
+                              {
+                                label: "Reveal day note",
+                                onClick: () =>
+                                  void api
+                                    .revealPath(`days/${selected}.md`)
+                                    .catch((e) => onError(errText(e))),
                               },
-                            },
-                          ]
-                        : undefined
-                    }
-                  />
+                              {
+                                label: "Copy date",
+                                onClick: () => {
+                                  void copyText(fmt.date(selected));
+                                  onNotice?.("Copied date");
+                                },
+                              },
+                            ]
+                          : undefined
+                      }
+                    />
+                    {selected && <Backlinks target={`days/${selected}`} onError={onError} />}
+                  </>
                 ) : (
                   <div className="empty" style={{ padding: 0 }}>
                     <h2>No day note yet</h2>
