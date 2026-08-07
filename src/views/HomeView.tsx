@@ -16,6 +16,8 @@ import { useViewHandlers } from "../viewhost";
 type Props = {
   /** ISO date for today, from the backend clock. */
   date: string;
+  /** Bumped when background routing lands, so this re-queries. */
+  refreshTick?: number;
   onChanged: () => void;
   onError: (m: string) => void;
   onNotice?: (m: string) => void;
@@ -45,7 +47,7 @@ function byProject(entries: Entry[]): { slug: string; name: string; entries: Ent
  * The hub. Everything here is a query over the item layer rather than a file
  * being read — which is the whole point of keeping triage's properties.
  */
-export default function HomeView({ date, onChanged, onError, onNotice }: Props) {
+export default function HomeView({ date, refreshTick, onChanged, onError, onNotice }: Props) {
   const [openLoops, setOpenLoops] = useState<Entry[]>([]);
   const [tasks, setTasks] = useState<Entry[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -83,7 +85,7 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshTick]);
 
   // First run on an existing vault: the index is empty but the markdown is
   // full. Recovering costs nothing, so just do it rather than asking.

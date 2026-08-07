@@ -828,3 +828,6 @@ textarea {
 .cell-title { display: flex; align-items: baseline; gap: var(--s2); }
 .cell-title input[type="checkbox"] { accent-color: var(--accent); }
 .struck { text-decoration: line-through; color: var(--dim); }
+
+.settings input.checkbox { width: 15px; height: 15px; accent-color: var(--accent); flex: 0 0 auto; }
+.settings label > .row { flex: 1; gap: var(--s2); }

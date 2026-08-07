@@ -2004,3 +2004,26 @@ Second line.
         assert_eq!(extract_overview_body("# No overview here\n"), None);
     }
 }
+
+/// Inbox items that have sat untouched for at least `min_idle_secs`.
+///
+/// Idleness comes from the file's modified time rather than the capture stamp,
+/// so editing an item restarts its clock — auto-routing must never fire out
+/// from under someone who is still typing.
+pub fn list_inbox_idle(v: &Path, min_idle_secs: u64) -> Result<Vec<InboxItem>> {
+    let now = std::time::SystemTime::now();
+    let mut out = Vec::new();
+    for item in list_inbox(v)? {
+        let path = inbox_dir(v).join(format!("{}.md", item.id));
+        let idle = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| now.duration_since(t).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if idle >= min_idle_secs {
+            out.push(item);
+        }
+    }
+    Ok(out)
+}

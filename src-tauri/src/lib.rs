@@ -20,6 +20,9 @@ use vault::ProjectMeta;
 pub struct AppState {
     settings: Mutex<Settings>,
     config_dir: PathBuf,
+    /// Serializes triage runs. The auto-processor and the buttons share one
+    /// path, and two of them draining the inbox at once would double-file.
+    processing: tauri::async_runtime::Mutex<()>,
 }
 
 impl AppState {
@@ -898,6 +901,17 @@ async fn process_inbox(
     id: Option<String>,
 ) -> CmdResult<InboxProcessResult> {
     let s = state.settings();
+    let _guard = state.processing.lock().await;
+    drain_inbox(&s, date, id).await
+}
+
+/// The triage loop itself, with no Tauri state attached, so the background
+/// auto-processor can run exactly the same path the buttons do.
+async fn drain_inbox(
+    s: &Settings,
+    date: Option<String>,
+    id: Option<String>,
+) -> CmdResult<InboxProcessResult> {
     let v = s.vault();
     let api_key = s.resolved_api_key();
     let provider = s.normalized_provider().to_string();
@@ -974,7 +988,7 @@ async fn process_inbox(
     }
 
     // Standing overviews: rewrite ## Overview only for pages this batch touched.
-    refresh_touched_overviews(&v, &s, &processed).await;
+    refresh_touched_overviews(&v, s, &processed).await;
 
     Ok(InboxProcessResult { processed, errors })
 }
@@ -992,6 +1006,64 @@ async fn process_inbox_item(
     id: String,
 ) -> CmdResult<InboxProcessResult> {
     process_inbox(state, None, Some(id)).await
+}
+
+/// Route captures on their own once they have stopped moving.
+///
+/// This is only safe because entries became editable: silent routing with no
+/// way to correct a bad guess would be a trap. A failure leaves the item in the
+/// inbox and backs off rather than retrying in a loop burning API calls.
+fn spawn_auto_processor(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        const TICK: u64 = 20;
+        let mut backoff = 0u32;
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(TICK)).await;
+
+            let state = app.state::<AppState>();
+            let s = state.settings();
+            if !s.auto_process || s.resolved_api_key().is_empty() {
+                continue;
+            }
+            if backoff > 0 {
+                backoff -= 1;
+                continue;
+            }
+
+            let idle = match vault::list_inbox_idle(&s.vault(), s.auto_process_delay_secs) {
+                Ok(i) => i,
+                Err(_) => continue,
+            };
+            if idle.is_empty() {
+                continue;
+            }
+
+            let guard = state.processing.lock().await;
+            let mut any = false;
+            let mut failed = 0usize;
+            for item in idle {
+                match drain_inbox(&s, None, Some(item.id.clone())).await {
+                    Ok(r) => {
+                        if !r.processed.is_empty() {
+                            any = true;
+                        }
+                        failed += r.errors.len();
+                    }
+                    Err(_) => failed += 1,
+                }
+            }
+            drop(guard);
+
+            if failed > 0 {
+                // Roughly a minute of quiet per consecutive failure, capped.
+                backoff = (backoff + 3).min(15);
+            }
+            if any || failed > 0 {
+                let _ = app.emit("inbox-auto-processed", failed);
+            }
+        }
+    });
 }
 
 // -------------------------------------------------------------------- setup
@@ -1078,10 +1150,16 @@ pub fn run() {
             }
             build_tray(app.handle())?;
 
+            let auto = settings.auto_process;
             app.manage(AppState {
                 settings: Mutex::new(settings),
                 config_dir,
+                processing: tauri::async_runtime::Mutex::new(()),
             });
+
+            if auto {
+                spawn_auto_processor(app.handle().clone());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

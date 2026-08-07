@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api, errText, type DayEntry, type Settings } from "./api";
 import ConfirmDialog from "./ConfirmDialog";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
@@ -68,6 +69,8 @@ export default function App() {
   /** Navigation held back by an unsaved editor, replayed if the user confirms. */
   const [blockedNav, setBlockedNav] = useState<(() => void) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** Bumped when background work lands, so open views re-query. */
+  const [refreshTick, setRefreshTick] = useState(0);
   const handlers = useRef<ViewHandlers>({});
   const menu = useContextMenu();
 
@@ -104,6 +107,25 @@ export default function App() {
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
+  }, [refreshDays, refreshInbox]);
+
+  // The auto-processor files things while you are looking at something else.
+  useEffect(() => {
+    const un = listen<number>("inbox-auto-processed", (e) => {
+      refreshDays();
+      refreshInbox();
+      setRefreshTick((n) => n + 1);
+      if (e.payload > 0) {
+        setBanner(
+          `${e.payload} capture${e.payload === 1 ? "" : "s"} could not be filed and are still in the inbox.`
+        );
+      } else {
+        flash("Filed automatically");
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
   }, [refreshDays, refreshInbox]);
 
   useEffect(() => {
@@ -392,6 +414,7 @@ export default function App() {
               {tab === "home" &&
                 (todayIso ? (
                   <HomeView
+                    refreshTick={refreshTick}
                     date={todayIso}
                     onChanged={onChanged}
                     onError={setBanner}

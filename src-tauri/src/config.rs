@@ -38,6 +38,13 @@ pub struct Settings {
     /// Display format for times: 24h | 12h
     #[serde(default = "default_time_format")]
     pub time_format: String,
+    /// Route captures without being asked, once they have sat still a while.
+    #[serde(default = "default_auto_process")]
+    pub auto_process: bool,
+    /// Seconds a capture must sit untouched before auto-routing. The pause is
+    /// deliberate: it is the window for second thoughts and quick edits.
+    #[serde(default = "default_auto_process_delay")]
+    pub auto_process_delay_secs: u64,
 }
 
 fn default_provider() -> String {
@@ -55,6 +62,12 @@ fn default_hotkey() -> String {
 }
 fn default_context_days() -> usize {
     3
+}
+fn default_auto_process() -> bool {
+    true
+}
+fn default_auto_process_delay() -> u64 {
+    90
 }
 fn default_date_format() -> String {
     crate::datetime::locale_date_format()
@@ -79,6 +92,8 @@ impl Default for Settings {
             effort: default_effort(),
             capture_hotkey: default_hotkey(),
             context_days: default_context_days(),
+            auto_process: default_auto_process(),
+            auto_process_delay_secs: default_auto_process_delay(),
             date_format: default_date_format(),
             time_format: default_time_format(),
         }

@@ -16,6 +16,10 @@ export type Settings = {
   date_format: string;
   /** 24h | 12h */
   time_format: string;
+  /** Route captures automatically once they have sat still. */
+  auto_process: boolean;
+  /** Seconds a capture must sit untouched first. */
+  auto_process_delay_secs: number;
 };
 
 export type DayEntry = {

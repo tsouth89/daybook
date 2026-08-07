@@ -142,6 +142,43 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
       </section>
 
       <section>
+        <h3>Routing</h3>
+        <label>
+          <span>Automatic</span>
+          <span className="row">
+            <input
+              type="checkbox"
+              className="checkbox"
+              checked={draft.auto_process}
+              onChange={(e) => set("auto_process", e.target.checked)}
+            />
+            <span className="dim tiny">File captures without being asked</span>
+          </span>
+        </label>
+        <label>
+          <span>Wait</span>
+          <span className="row">
+            <input
+              type="number"
+              min={10}
+              max={3600}
+              value={draft.auto_process_delay_secs}
+              onChange={(e) =>
+                set("auto_process_delay_secs", Math.max(10, Number(e.target.value) || 90))
+              }
+              style={{ width: 90 }}
+            />
+            <span className="dim tiny">seconds of no edits before it routes</span>
+          </span>
+        </label>
+        <p className="dim tiny">
+          The pause is the window for second thoughts — editing a capture restarts its
+          clock. Each capture costs one model call whether you press the button or not.
+          Turn this off to stay on manual.
+        </p>
+      </section>
+
+      <section>
         <h3>Keyboard</h3>
         <p className="dim tiny">
           The capture hotkey above is global. These work inside the app, except while you are typing
