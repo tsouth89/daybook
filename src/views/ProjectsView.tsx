@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type ProjectEntry, type ProjectMeta } from "../api";
 import Backlinks from "../Backlinks";
+import EntryPanel from "../EntryPanel";
 import ConfirmDialog from "../ConfirmDialog";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import { useFormat } from "../FormatContext";
@@ -422,6 +423,13 @@ export default function ProjectsView({
                         ]
                       : undefined
                   }
+                />
+              )}
+              {editing === null && selected && (
+                <EntryPanel
+                  slug={selected.split(":")[1]}
+                  onError={onError}
+                  onNotice={onNotice}
                 />
               )}
               {editing === null && backlinkTarget && (

@@ -25,7 +25,7 @@ areas/<slug>.md            ongoing responsibilities (health, finances, house)
 personal.md                rollup of personal-scoped entries over time
 ideas.md                   maybe-someday, dated
 tasks.md                   open checkboxes, dated
-attachments/               pasted images
+attachments/               stored copies of dropped files and pasted images
 config/projects.json       known projects/areas + aliases
 config/glossary.txt        jargon list, repairs dictation errors
 config/profile.md          durable facts about you, fed to every pass
@@ -53,6 +53,12 @@ carry an `<!-- e:id -->` marker so the box can be matched to its record, and a
 The index is a build artifact like everything else outside `raw/`: delete it and
 it rebuilds. A malformed line is skipped rather than fatal.
 
+A vault that predates the index is not stranded. Home scans on first run and
+recovers records by parsing the markdown back, so there is no re-triage and no API
+cost. Recovered records are tagged as such and replaced wholesale on the next
+rebuild; capture-time records are never touched. Rescan lives on the Home context
+menu.
+
 **Scope and destination are independent.** Every entry gets a scope (`personal` or
 `work`) and a destination (`project`, `area`, `idea`, `task`, or day-only `note`).
 A personal project is just scope=personal + kind=project — no taxonomy collapse.
@@ -75,14 +81,23 @@ A failed triage leaves the item sitting in the inbox.
 ## Using it
 
 - **Capture**: `Ctrl+Shift+Space` opens the overlay. Dictate, `Ctrl+Enter` to save,
-  `Esc` to dismiss. Images paste straight in. Text stays in the box if a save fails.
-- **Today**: where the app opens. Today's note, what is still waiting in the inbox for
-  today, and one button to file it. The sidebar badge is today's pending count.
+  `Esc` to dismiss. Drop or paste anything — images embed, other files are copied into
+  `attachments/` under their own name and linked. Text stays in the box if a save fails.
+- **Home**: where the app opens, and the only page that is pure query. Open loops
+  grouped by project, outstanding tasks with overdue called out, projects by recency.
+  Ticking a task here edits `tasks.md`, so it means the same thing as ticking it in
+  Obsidian.
+- **Today**: today's note, what is still waiting in the inbox for today, and one
+  button to file it. The sidebar badge is today's pending count.
 - **Inbox**: review pending captures, then Process. One dump that mentions a bug fix,
   a dentist appointment, and a side idea becomes three routed entries. Captures are
   editable before processing — fix a mangled word instead of discarding and redictating.
 - **Days / Projects**: read what was filed. Projects and areas share one list; filter
-  by kind or scope. Each page lists what links to it under "Linked from".
+  by kind or scope. Below each project page is what the item layer knows about it —
+  what is open, what is outstanding, what happened lately — plus "Linked from".
+- **Search**: filter by scope, kind, project, or open loops and you are querying the
+  item layer; type a bare word and you also get a substring pass over the raw markdown,
+  which is what catches hand-written notes that were never routed.
 - **Tune**: glossary first (dictation mangles proper nouns), then aliases, then the
   profile. Those three beat any model upgrade.
 
@@ -92,6 +107,7 @@ In-app shortcuts, ignored while you are typing in an editor or input:
 
 | Shortcut | Action |
 |---|---|
+| `Ctrl+Shift+H` | Home |
 | `Ctrl+Shift+T` | Today |
 | `Ctrl+Shift+I` | Inbox |
 | `Ctrl+Shift+D` | Days |
@@ -129,5 +145,7 @@ Rust backend under `src-tauri/src`:
 
 - `vault.rs` — file IO and the vault layout
 - `ai.rs` — triage call, prompt, and Markdown renderers
+- `entries.rs` — the item layer: records, queries, task state
+- `backfill.rs` — recovering records from markdown written before the index
 - `config.rs` — settings and API key resolution
 - `lib.rs` — Tauri commands, global hotkey, window wiring

@@ -526,3 +526,12 @@ kbd {
   overflow-wrap: anywhere;
 }
 .entry-hit .loop-list { margin-top: 6px; }
+
+.entry-panel {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  max-width: 760px;
+  display: grid;
+  gap: 20px;
+}
