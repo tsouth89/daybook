@@ -794,9 +794,24 @@ fn set_section(v: &Path, kind: &str, slug: &str, heading: &str, body: &str) -> R
         .with_context(|| format!("reading {}", path.display()))?;
 
     let want = format!("## {heading}");
-    let lines: Vec<&str> = text.lines().collect();
-    let Some(start) = lines.iter().position(|l| l.trim() == want) else {
-        anyhow::bail!("{slug} has no {want} section.");
+    let mut lines: Vec<&str> = text.lines().collect();
+
+    // Sections that have nothing in them are not rendered, so writing to one
+    // has to be able to create it. Insert in the page's canonical order.
+    let owned;
+    let start = match lines.iter().position(|l| l.trim() == want) {
+        Some(i) => i,
+        None => {
+            let after = [SECTION_NOW, SECTION_LOG]
+                .iter()
+                .filter_map(|h| lines.iter().position(|l| l.trim() == format!("## {h}")))
+                .min()
+                .unwrap_or(lines.len());
+            owned = want.clone();
+            lines.insert(after, "");
+            lines.insert(after, &owned);
+            after
+        }
     };
     let end = lines[start + 1..]
         .iter()
@@ -2109,18 +2124,21 @@ Raw: [[raw/2026-08-06]]
         // Owned sections survive a rewrite.
         assert!(text.contains("Voice-first journal."), "got: {text}");
         assert!(text.contains("- [ ] Ship the hybrid"), "got: {text}");
-        // The log is one line per entry, not the prose.
-        assert!(text.contains("- 06/08/2026 — Screenshot attachments render broken · [[days/2026-08-06]]"));
-        assert!(text.contains("- 06/08/2026 — Combining Notion and Obsidian · [[days/2026-08-06]]"));
-        assert!(!text.contains("long verbatim prose"), "prose stays in the day note");
+        assert!(text.contains("## Objectives"), "kept because it was written");
+        // The log is meant to be read: each entry brings its own prose.
+        assert!(text.contains("### Screenshot attachments render broken"), "got: {text}");
+        assert!(text.contains("### Combining Notion and Obsidian"));
+        assert!(text.contains("long verbatim prose"), "the page is readable on its own");
+        assert!(text.contains("[[days/2026-08-06]]"), "still points at the day");
 
         // Closing the loop takes it off the page; that is the whole point.
-        assert!(text.contains("- Fix pasted screenshots"));
+        assert!(text.contains("## Now"));
         crate::entries::resolve_open(&v, "cap-1-e0", "Fix pasted screenshots").unwrap();
         render_entity_page(&v, "project", "daybook", "DD/MM/YYYY").unwrap();
         let text = std::fs::read_to_string(projects_dir(&v).join("daybook.md")).unwrap();
-        assert!(!text.contains("- Fix pasted screenshots"), "got: {text}");
-        assert!(text.contains("_Nothing open._"));
+        // With nothing open the section is gone entirely rather than sitting
+        // there empty; a notebook should not have furniture with nothing in it.
+        assert!(!text.contains("## Now"), "got: {text}");
     }
 
     #[test]
@@ -2605,29 +2623,28 @@ pub fn render_entity_page(v: &Path, kind: &str, slug: &str, date_fmt: &str) -> R
         None => out.push_str("_Not described yet._\n\n"),
     }
 
-    out.push_str(&format!("## {SECTION_OBJECTIVES}\n\n"));
-    match &objectives {
-        Some(o) => {
-            out.push_str(o.trim());
-            out.push_str("\n\n");
-        }
-        None => out.push_str("- [ ] \n\n"),
+    // Objectives are kept only if the author wrote some; nothing prompts for
+    // them. A checklist is tracking apparatus, and this is a notebook.
+    if let Some(o) = &objectives {
+        out.push_str(&format!("## {SECTION_OBJECTIVES}\n\n"));
+        out.push_str(o.trim());
+        out.push_str("\n\n");
     }
 
-    out.push_str(&format!("## {SECTION_NOW}\n\n"));
     let open: Vec<&String> = records.iter().flat_map(|r| r.open.iter()).collect();
-    if open.is_empty() {
-        out.push_str("_Nothing open._\n\n");
-    } else {
+    if !open.is_empty() {
+        out.push_str(&format!("## {SECTION_NOW}\n\n"));
         for line in open {
             out.push_str(&format!("- {}\n", line.trim()));
         }
         out.push('\n');
     }
 
+    // The log is meant to be read, so each entry carries its own prose instead
+    // of a bare title pointing somewhere else.
     out.push_str(&format!("## {SECTION_LOG}\n\n"));
     if records.is_empty() {
-        out.push_str("_Nothing filed yet._\n");
+        out.push_str("_Nothing here yet._\n");
     } else {
         for r in &records {
             let title = if r.title.trim().is_empty() {
@@ -2636,11 +2653,25 @@ pub fn render_entity_page(v: &Path, kind: &str, slug: &str, date_fmt: &str) -> R
                 r.title.clone()
             };
             out.push_str(&format!(
-                "- {} — {} · [[days/{}]]\n",
-                crate::datetime::format_date(&r.date, date_fmt),
+                "### {}\n\n_{} · [[days/{}]]_\n\n",
                 title.trim(),
+                crate::datetime::format_date(&r.date, date_fmt),
                 r.date
             ));
+            let body = r.body.trim();
+            if !body.is_empty() {
+                out.push_str(body);
+                out.push_str("\n\n");
+            }
+            for d in &r.decisions {
+                out.push_str(&format!("- **Decided:** {}\n", d.trim()));
+            }
+            for o in &r.open {
+                out.push_str(&format!("- **Open:** {}\n", o.trim()));
+            }
+            if !r.decisions.is_empty() || !r.open.is_empty() {
+                out.push('\n');
+            }
         }
     }
 

@@ -991,3 +991,62 @@ textarea {
 }
 
 .loose { margin-top: var(--s5); max-width: 720px; }
+
+/* ------------------------------------------------------- home: the feed */
+/* A reading surface, not a dashboard. Measure and rhythm matter more than
+   density, so nothing here is a card and nothing carries a count. */
+
+.feed { max-width: 700px; }
+.feed-strip {
+  display: flex; align-items: baseline; gap: var(--s3);
+  padding-bottom: var(--s3); margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+.feed-title {
+  font-size: var(--t-xl); font-weight: 600;
+  color: var(--fg-strong); letter-spacing: -0.4px;
+}
+
+.feed-day { margin-bottom: var(--s6); }
+.feed-day-head {
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--dim); font-weight: 600;
+  margin: 0 0 var(--s3);
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.entry {
+  padding: var(--s3) var(--s3) var(--s3) var(--s4);
+  margin: 0 calc(var(--s3) * -1) var(--s2);
+  border-radius: var(--radius);
+  border-left: 2px solid transparent;
+}
+.entry:hover { background: var(--bg-2); border-left-color: var(--line); }
+
+.entry-meta { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: 2px; }
+.entry-owner {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font-size: var(--t-xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.entry-owner:hover { text-decoration: underline; }
+.entry-owner.plain { color: var(--dimmer); cursor: default; }
+
+.entry-title {
+  margin: 0 0 var(--s1); font-size: var(--t-md); font-weight: 600;
+  color: var(--fg-strong); letter-spacing: -0.15px; line-height: 1.35;
+}
+.entry-body .md { font-size: var(--t-base); line-height: 1.65; }
+.entry-body .md > :first-child { margin-top: 0; }
+.entry-body .md > :last-child { margin-bottom: 0; }
+.entry-body img { max-width: 100%; border-radius: var(--radius-sm); }
+
+.entry-extra { margin-top: var(--s2); font-size: var(--t-sm); line-height: 1.6; }
+.entry-tag {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.7px;
+  color: var(--dimmer); font-weight: 700; margin-right: var(--s1);
+}
+.entry-tag.open { color: var(--warn); }
+
+.feed-more { padding: var(--s4) 0 var(--s6); }

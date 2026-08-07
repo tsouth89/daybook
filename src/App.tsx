@@ -430,6 +430,7 @@ export default function App() {
                   <HomeView
                     refreshTick={refreshTick}
                     date={todayIso}
+                    vaultPath={vaultPath}
                     onChanged={onChanged}
                     onError={setBanner}
                     onNotice={flash}
