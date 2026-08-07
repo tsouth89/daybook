@@ -774,7 +774,52 @@ pub fn write_tasks(v: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn set_entity_overview(v: &Path, kind: &str, slug: &str, overview_body: &str) -> Result<()> {
+/// Replace the `## What this is` body. The only section an AI writes on a page,
+/// and only when asked - Now and Log are generated for free from the index.
+pub fn set_entity_about(v: &Path, kind: &str, slug: &str, body: &str) -> Result<()> {
+    set_section(v, kind, slug, SECTION_ABOUT, body)
+}
+
+pub fn set_entity_objectives(v: &Path, kind: &str, slug: &str, body: &str) -> Result<()> {
+    set_section(v, kind, slug, SECTION_OBJECTIVES, body)
+}
+
+/// Replace one `## Heading` body, leaving every other section alone.
+fn set_section(v: &Path, kind: &str, slug: &str, heading: &str, body: &str) -> Result<()> {
+    let kind = if kind == "area" { "area" } else { "project" };
+    let slug = slugify(slug);
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+
+    let want = format!("## {heading}");
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(start) = lines.iter().position(|l| l.trim() == want) else {
+        anyhow::bail!("{slug} has no {want} section.");
+    };
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| l.starts_with("## "))
+        .map(|p| start + 1 + p)
+        .unwrap_or(lines.len());
+
+    let mut out: Vec<String> = lines[..=start].iter().map(|l| l.to_string()).collect();
+    out.push(String::new());
+    out.push(body.trim().to_string());
+    out.push(String::new());
+    out.extend(lines[end..].iter().map(|l| l.to_string()));
+
+    let mut joined = out.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    std::fs::write(&path, joined)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn set_entity_overview_legacy(v: &Path, kind: &str, slug: &str, overview_body: &str) -> Result<()> {
     let existing = read_entity(v, kind, slug)?;
     let next = replace_overview_section(&existing, overview_body);
     write_entity(v, kind, slug, &next)
@@ -2028,6 +2073,103 @@ Raw: [[raw/2026-08-06]]
     }
 
     #[test]
+    fn a_page_keeps_what_you_wrote_and_regenerates_what_it_derives() {
+        let v = tmp_vault();
+        create_entity(&v, "project", "Daybook", "personal").unwrap();
+
+        let mut r = crate::entries::EntryRecord {
+            id: "cap-1-e0".into(),
+            item_id: "cap-1".into(),
+            date: "2026-08-06".into(),
+            time: "10:00".into(),
+            scope: "personal".into(),
+            kind: "project".into(),
+            slug: "daybook".into(),
+            name: "Daybook".into(),
+            title: "Screenshot attachments render broken".into(),
+            body: "long verbatim prose that belongs in the day note".into(),
+            accomplished: vec![],
+            decisions: vec![],
+            open: vec!["Fix pasted screenshots".into()],
+            due: None,
+            source: crate::entries::SOURCE_TRIAGE.into(),
+        };
+        crate::entries::replace_item(&v, "cap-1", &[r.clone()]).unwrap();
+        render_entity_page(&v, "project", "daybook", "DD/MM/YYYY").unwrap();
+
+        // The author fills in the two sections that are theirs.
+        set_entity_about(&v, "project", "daybook", "Voice-first journal.").unwrap();
+        set_entity_objectives(&v, "project", "daybook", "- [ ] Ship the hybrid").unwrap();
+
+        // A second capture arrives.
+        r.id = "cap-2-e0".into();
+        r.item_id = "cap-2".into();
+        r.title = "Combining Notion and Obsidian".into();
+        r.open = vec![];
+        crate::entries::replace_item(&v, "cap-2", &[r]).unwrap();
+        render_entity_page(&v, "project", "daybook", "DD/MM/YYYY").unwrap();
+
+        let text = std::fs::read_to_string(projects_dir(&v).join("daybook.md")).unwrap();
+        // Owned sections survive a rewrite.
+        assert!(text.contains("Voice-first journal."), "got: {text}");
+        assert!(text.contains("- [ ] Ship the hybrid"), "got: {text}");
+        // The log is one line per entry, not the prose.
+        assert!(text.contains("- 06/08/2026 — Screenshot attachments render broken · [[days/2026-08-06]]"));
+        assert!(text.contains("- 06/08/2026 — Combining Notion and Obsidian · [[days/2026-08-06]]"));
+        assert!(!text.contains("long verbatim prose"), "prose stays in the day note");
+
+        // Closing the loop takes it off the page; that is the whole point.
+        assert!(text.contains("- Fix pasted screenshots"));
+        crate::entries::resolve_open(&v, "cap-1-e0", "Fix pasted screenshots").unwrap();
+        render_entity_page(&v, "project", "daybook", "DD/MM/YYYY").unwrap();
+        let text = std::fs::read_to_string(projects_dir(&v).join("daybook.md")).unwrap();
+        assert!(!text.contains("- Fix pasted screenshots"), "got: {text}");
+        assert!(text.contains("_Nothing open._"));
+    }
+
+    #[test]
+    fn reformatting_a_legacy_page_keeps_a_copy_first() {
+        let v = tmp_vault();
+        std::fs::write(
+            projects_dir(&v).join("old.md"),
+            "---
+slug: old
+name: Old
+type: project
+scope: work
+---
+
+# Old
+
+## Overview
+
+- generated
+
+## 06/08/2026
+
+### `cap-9`
+
+Something I typed by hand.
+",
+        )
+        .unwrap();
+
+        render_entity_page(&v, "project", "old", "DD/MM/YYYY").unwrap();
+        let text = std::fs::read_to_string(projects_dir(&v).join("old.md")).unwrap();
+        assert!(!text.contains("Something I typed by hand"), "old shape is gone");
+
+        // ...but recoverable, because the reformat cannot know what was hand-written.
+        let bin = crate::trash::list(&v);
+        assert_eq!(bin.len(), 1);
+        match &bin[0].payload {
+            crate::trash::Payload::Entity { markdown, .. } => {
+                assert!(markdown.contains("Something I typed by hand"))
+            }
+            _ => panic!("expected the page in the trash"),
+        }
+    }
+
+    #[test]
     fn nesting_is_a_property_and_refuses_to_make_rings() {
         let v = tmp_vault();
         for slug in ["toolport", "billing"] {
@@ -2340,5 +2482,172 @@ pub fn set_entity_status(v: &Path, kind: &str, slug: &str, status: &str) -> Resu
         m.status = status.to_string();
         write_projects_config(v, &known)?;
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The project page as a standing document.
+//
+// A page has two halves. `## What this is` and `## Objectives` belong to the
+// author and are never regenerated. `## Now` and `## Log` are views over the
+// item layer and are rewritten from scratch every time, which is what lets a
+// closed loop actually disappear instead of accumulating forever.
+//
+// The full prose of each entry lives in the day note and in `raw/`; the log
+// here is one line per entry pointing at it. Two days of use used to produce
+// sixty lines on a page; this keeps it flat.
+// ---------------------------------------------------------------------------
+
+pub const SECTION_ABOUT: &str = "What this is";
+pub const SECTION_OBJECTIVES: &str = "Objectives";
+pub const SECTION_NOW: &str = "Now";
+pub const SECTION_LOG: &str = "Log";
+
+/// Body of one `## Heading` section, up to the next `##`.
+pub fn extract_section(content: &str, heading: &str) -> Option<String> {
+    let want = format!("## {heading}");
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.iter().position(|l| l.trim() == want)? + 1;
+    let end = lines[start..]
+        .iter()
+        .position(|l| l.starts_with("## "))
+        .map(|p| start + p)
+        .unwrap_or(lines.len());
+    let body = lines[start..end].join("\n").trim().to_string();
+    if body.is_empty() || body == "_Not described yet._" || body == "- [ ]" {
+        None
+    } else {
+        Some(body)
+    }
+}
+
+/// True if this page still has the old shape: an `## Overview` or dated
+/// sections rather than the standing-document sections.
+fn is_legacy_page(content: &str) -> bool {
+    content.lines().any(|l| l.trim() == "## Overview")
+        || (extract_section(content, SECTION_ABOUT).is_none()
+            && content.lines().any(|l| l.starts_with("### `")))
+}
+
+/// Rewrite a project or area page from the item layer, preserving the sections
+/// the author owns.
+pub fn render_entity_page(v: &Path, kind: &str, slug: &str, date_fmt: &str) -> Result<()> {
+    ensure_vault(v)?;
+    let kind = if kind == "area" { "area" } else { "project" };
+    let slug = slugify(slug);
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+
+    let meta = read_projects_config(v).into_iter().find(|m| m.slug == slug);
+    let field = |key: &str| -> Option<String> {
+        existing
+            .lines()
+            .find_map(|l| l.strip_prefix(&format!("{key}: ")).map(|s| s.trim().to_string()))
+            .filter(|s| !s.is_empty())
+    };
+    let name = meta
+        .as_ref()
+        .map(|m| m.name.clone())
+        .or_else(|| field("name"))
+        .unwrap_or_else(|| slug.clone());
+    let scope = meta
+        .as_ref()
+        .map(|m| m.scope.clone())
+        .or_else(|| field("scope"))
+        .unwrap_or_else(|| "personal".into());
+    let status = field("status").unwrap_or_else(|| "active".into());
+    let parent = field("parent");
+
+    // Anything the author wrote outside the four known sections would be lost,
+    // so keep a copy before the first rewrite rather than silently dropping it.
+    if !existing.trim().is_empty() && is_legacy_page(&existing) {
+        crate::trash::put(
+            v,
+            &format!("{name} (page before reformat)"),
+            crate::trash::Payload::Entity {
+                entity_kind: kind.to_string(),
+                slug: slug.clone(),
+                markdown: existing.clone(),
+                meta: meta.clone(),
+            },
+        )?;
+    }
+
+    let about = extract_section(&existing, SECTION_ABOUT).or_else(|| {
+        meta.as_ref()
+            .map(|m| m.description.clone())
+            .filter(|d| !d.trim().is_empty())
+    });
+    let objectives = extract_section(&existing, SECTION_OBJECTIVES);
+
+    let mut records: Vec<_> = crate::entries::load(v)
+        .into_iter()
+        .filter(|r| r.slug == slug)
+        .collect();
+    records.sort_by(|a, b| (&b.date, &b.time).cmp(&(&a.date, &a.time)));
+
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&format!("slug: {slug}\n"));
+    out.push_str(&format!("name: {name}\n"));
+    out.push_str(&format!("type: {kind}\n"));
+    out.push_str(&format!("scope: {scope}\n"));
+    out.push_str(&format!("status: {status}\n"));
+    if let Some(p) = parent {
+        out.push_str(&format!("parent: {p}\n"));
+    }
+    out.push_str("---\n\n");
+    out.push_str(&format!("# {name}\n\n"));
+
+    out.push_str(&format!("## {SECTION_ABOUT}\n\n"));
+    match &about {
+        Some(a) => {
+            out.push_str(a.trim());
+            out.push_str("\n\n");
+        }
+        None => out.push_str("_Not described yet._\n\n"),
+    }
+
+    out.push_str(&format!("## {SECTION_OBJECTIVES}\n\n"));
+    match &objectives {
+        Some(o) => {
+            out.push_str(o.trim());
+            out.push_str("\n\n");
+        }
+        None => out.push_str("- [ ] \n\n"),
+    }
+
+    out.push_str(&format!("## {SECTION_NOW}\n\n"));
+    let open: Vec<&String> = records.iter().flat_map(|r| r.open.iter()).collect();
+    if open.is_empty() {
+        out.push_str("_Nothing open._\n\n");
+    } else {
+        for line in open {
+            out.push_str(&format!("- {}\n", line.trim()));
+        }
+        out.push('\n');
+    }
+
+    out.push_str(&format!("## {SECTION_LOG}\n\n"));
+    if records.is_empty() {
+        out.push_str("_Nothing filed yet._\n");
+    } else {
+        for r in &records {
+            let title = if r.title.trim().is_empty() {
+                r.kind.clone()
+            } else {
+                r.title.clone()
+            };
+            out.push_str(&format!(
+                "- {} — {} · [[days/{}]]\n",
+                crate::datetime::format_date(&r.date, date_fmt),
+                title.trim(),
+                r.date
+            ));
+        }
+    }
+
+    std::fs::write(&path, out)?;
     Ok(())
 }

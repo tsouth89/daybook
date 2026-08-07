@@ -202,7 +202,36 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> CmdRe
 #[tauri::command]
 fn update_entry(state: tauri::State<AppState>, entry: entries::EntryRecord) -> CmdResult<()> {
     let s = state.settings();
-    entries::update_entry(&s.vault(), &entry, &s.date_format).map_err(err)
+    let v = s.vault();
+    // The old owner's page loses a log line, the new one gains it.
+    let before = entries::load(&v).into_iter().find(|r| r.id == entry.id).map(|r| r.slug);
+    entries::update_entry(&v, &entry, &s.date_format).map_err(err)?;
+    for slug in [before.unwrap_or_default(), entry.slug.clone()] {
+        if !slug.is_empty() {
+            let _ = vault::render_entity_page(&v, entity_kind_of(&v, &slug), &slug, &s.date_format);
+        }
+    }
+    Ok(())
+}
+
+/// A slug alone does not say whether it is a project or an area.
+fn entity_kind_of(v: &std::path::Path, slug: &str) -> &'static str {
+    match vault::read_projects_config(v)
+        .into_iter()
+        .find(|m| m.slug == slug)
+        .map(|m| m.kind)
+        .as_deref()
+    {
+        Some("area") => "area",
+        _ => "project",
+    }
+}
+
+/// Rebuild a page's generated halves after its entries change.
+fn repaint(v: &std::path::Path, slug: &str, date_fmt: &str) {
+    if !slug.is_empty() {
+        let _ = vault::render_entity_page(v, entity_kind_of(v, slug), slug, date_fmt);
+    }
 }
 
 #[tauri::command]
@@ -211,12 +240,20 @@ fn create_entry(
     entry: entries::EntryRecord,
 ) -> CmdResult<entries::EntryRecord> {
     let s = state.settings();
-    entries::create_entry(&s.vault(), entry, &s.date_format).map_err(err)
+    let v = s.vault();
+    let made = entries::create_entry(&v, entry, &s.date_format).map_err(err)?;
+    repaint(&v, &made.slug, &s.date_format);
+    Ok(made)
 }
 
 #[tauri::command]
 fn delete_entry(state: tauri::State<AppState>, entry_id: String) -> CmdResult<()> {
-    entries::delete_entry(&state.settings().vault(), &entry_id).map_err(err)
+    let s = state.settings();
+    let v = s.vault();
+    let slug = entries::load(&v).into_iter().find(|r| r.id == entry_id).map(|r| r.slug);
+    entries::delete_entry(&v, &entry_id).map_err(err)?;
+    repaint(&v, &slug.unwrap_or_default(), &s.date_format);
+    Ok(())
 }
 
 #[tauri::command]
@@ -225,7 +262,13 @@ fn resolve_open_loop(
     entry_id: String,
     line: String,
 ) -> CmdResult<()> {
-    entries::resolve_open(&state.settings().vault(), &entry_id, &line).map_err(err)
+    let s = state.settings();
+    let v = s.vault();
+    entries::resolve_open(&v, &entry_id, &line).map_err(err)?;
+    // Closing a loop has to take it off the page, which was the whole point.
+    let slug = entries::load(&v).into_iter().find(|r| r.id == entry_id).map(|r| r.slug);
+    repaint(&v, &slug.unwrap_or_default(), &s.date_format);
+    Ok(())
 }
 
 /// Nest one page under another. Files never move, so links survive.
@@ -474,7 +517,7 @@ async fn refresh_entity_overview(
     })
     .await
     .map_err(err)?;
-    vault::set_entity_overview(&v, &kind, &slug, &overview).map_err(err)?;
+    vault::set_entity_about(&v, &kind, &slug, &overview).map_err(err)?;
     vault::read_entity(&v, &kind, &slug).map_err(err)
 }
 
@@ -756,28 +799,13 @@ fn apply_triage(
         }
     }
 
-    // Write entity files. Attachments from the capture go on the first project/area only.
-    let mut attachments_placed = false;
-    for (key, (kind, name, scope, body)) in &entity_bodies {
+    // Register the entities this capture touched. The pages themselves are
+    // rendered further down, after the records exist, because a page is now a
+    // view over the item layer rather than something appended to.
+    let mut touched_pages: Vec<(String, String)> = Vec::new();
+    for (key, (kind, name, scope, _body)) in &entity_bodies {
         let slug = key.split_once(':').map(|(_, s)| s).unwrap_or(key);
-        let body = if !attachments_placed {
-            attachments_placed = true;
-            vault::ensure_attachment_markdown(&item.text, body)
-        } else {
-            body.clone()
-        };
-        vault::upsert_entity_day(
-            v,
-            kind,
-            slug,
-            name,
-            scope,
-            &item.date,
-            &item.id,
-            &body,
-            date_fmt,
-        )
-        .map_err(err)?;
+        touched_pages.push((kind.clone(), slug.to_string()));
         destinations.push(format!("{kind}/{slug}"));
 
         if !known.iter().any(|k| k.slug == *slug) {
@@ -837,6 +865,11 @@ fn apply_triage(
         })
         .collect();
     entries::replace_item(v, &item.id, &records).map_err(err)?;
+
+    // Now the records exist, so Now and Log can be built from them.
+    for (kind, slug) in &touched_pages {
+        vault::render_entity_page(v, kind, slug, date_fmt).map_err(err)?;
+    }
 
     let day_body = vault::ensure_attachment_markdown(
         &item.text,
@@ -970,77 +1003,6 @@ fn apply_actions(
     Ok(done)
 }
 
-async fn refresh_touched_overviews(
-    v: &std::path::Path,
-    s: &Settings,
-    processed: &[ItemProcessResult],
-) {
-    if s.resolved_api_key().is_empty() {
-        return;
-    }
-    let provider = s.normalized_provider().to_string();
-    let api_key = s.resolved_api_key();
-
-    let mut entities: Vec<(String, String, String)> = Vec::new(); // kind, slug, name
-    let mut personal = false;
-    for r in processed {
-        for d in &r.destinations {
-            if d == "personal" {
-                personal = true;
-            }
-            if let Some((kind, slug)) = d.split_once('/') {
-                if kind == "project" || kind == "area" {
-                    if !entities.iter().any(|(k, s, _)| k == kind && s == slug) {
-                        let name = vault::read_projects_config(v)
-                            .into_iter()
-                            .find(|p| p.slug == slug)
-                            .map(|p| p.name)
-                            .unwrap_or_else(|| slug.to_string());
-                        entities.push((kind.to_string(), slug.to_string(), name));
-                    }
-                }
-            }
-        }
-    }
-
-    for (kind, slug, name) in entities {
-        let page = match vault::read_entity(v, &kind, &slug) {
-            Ok(p) if !p.trim().is_empty() => p,
-            _ => continue,
-        };
-        if let Ok(overview) = ai::refresh_overview(ai::OverviewRequest {
-            provider: &provider,
-            api_key: &api_key,
-            model: &s.model,
-            effort: &s.effort,
-            title: &name,
-            kind: &kind,
-            page_markdown: &page,
-        })
-        .await
-        {
-            let _ = vault::set_entity_overview(v, &kind, &slug, &overview);
-        }
-    }
-
-    if personal {
-        let page = vault::read_personal(v);
-        if let Ok(overview) = ai::refresh_overview(ai::OverviewRequest {
-            provider: &provider,
-            api_key: &api_key,
-            model: &s.model,
-            effort: &s.effort,
-            title: "Personal",
-            kind: "personal",
-            page_markdown: &page,
-        })
-        .await
-        {
-            let _ = vault::set_personal_overview(v, &overview);
-        }
-    }
-}
-
 /// Drain the inbox. Optional `date` / `id` narrow which items run.
 /// Failed items stay in the inbox.
 #[tauri::command]
@@ -1136,8 +1098,9 @@ async fn drain_inbox(
         vault::write_projects_config(&v, &known).map_err(err)?;
     }
 
-    // Standing overviews: rewrite ## Overview only for pages this batch touched.
-    refresh_touched_overviews(&v, s, &processed).await;
+    // Deliberately no automatic overview call here. Now and Log regenerate from
+    // the index for free, and "What this is" is a description that does not
+    // change per capture - refreshing it every batch was paying for nothing.
 
     Ok(InboxProcessResult { processed, errors })
 }
