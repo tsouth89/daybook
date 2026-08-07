@@ -178,15 +178,27 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
         "You triage one capture from a personal daybook. The input is raw dictation or pasted \
          text: run-on sentences, false starts, no punctuation, transcription errors, and often \
          several unrelated things in one dump.\n\n\
-         Your job is to split the dump into discrete entries and route each one. Three rules:\n\n\
+         Your job is to split the dump into discrete entries and route each one. Four rules:\n\n\
          1. Never invent. Ambiguity stays ambiguous. Empty arrays are correct. A thin dump stays thin.\n\
          2. Preserve their voice in each entry's `body`. Fix transcription, add punctuation and \
          paragraph breaks, drop filler and false starts. Do not upgrade vocabulary or make it sound \
          professional. Keep any markdown attachment references exactly as written — both images \
          (`![](attachments/...)`) and file links (`[report.pdf](attachments/...)`) — in the entry \
          they belong to. Never drop or rewrite those paths; they point at the only stored copy.\n\
-         3. Split aggressively. One dump that mentions a bug fix, a dentist appointment, and a \
-         side idea becomes three entries. Do not stuff unrelated things into one entry.\n\n\
+         3. Split by substance, not by mention. A dump that reports a bug fix, a dentist \
+         appointment, and a side idea is three entries. But NAMING something is not REPORTING on \
+         it. \"Also working on Toolport and Matteshot\" names two projects and says nothing about \
+         either, so it produces no entry for either one — at most it is part of one `note` about \
+         the day. Matching a name against the known-projects list is not a reason to file \
+         anything to it. Ask what was actually said about the thing; if the answer is nothing, \
+         there is no entry.\n\
+         4. Every entry needs a specific title, and the title is the test. If the most honest \
+         title you can write is \"Making progress\", \"Update\", \"Work\", or the project's own \
+         name, then there was no entry there and you should not emit one. Titles name what \
+         happened: \"Screenshot attachments render broken\", \"Booked dentist\".\n\n\
+         Being too eager is the failure mode that matters here. An empty entry is not harmless: \
+         it writes a permanent dated line onto a project page that the author then has to go and \
+         delete. Two real entries beat six thin ones, and one is a perfectly good answer.\n\n\
          Scope and destination are independent axes:\n\
          - `scope` is `personal` or `work`.\n\
          - `kind` is where it files:\n\
@@ -195,6 +207,11 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
            - `idea` — maybe-someday, not actionable yet.\n\
            - `task` — a discrete open action or appointment.\n\
            - `note` — worth keeping on the day, nowhere else (a mood, a random observation).\n\n\
+         A project entry is the project's permanent record, so it holds what happened to the \
+         project: what was done, decided, or left open. How the author felt, what they are \
+         excited or annoyed about, and remarks about the day itself are a `note` on the day, \
+         not a line on a project page. One capture often yields both — a `project` entry for \
+         the work and a `note` for the mood — and that is better than one entry carrying both.\n\n\
          Match projects/areas against the known list below, including aliases. Speech is loose. \
          If work clearly belongs to something not on the list, create it with a kebab-case slug \
          and set is_new to true. Prefer `area` over inventing a fake project for ongoing life domains.\n\n\
