@@ -48,7 +48,19 @@ pub struct EntryRecord {
     pub open: Vec<String>,
     #[serde(default)]
     pub due: Option<String>,
+    /// `triage` for records written when the capture was processed, `recovered`
+    /// for ones parsed back out of existing markdown. Rebuilds replace every
+    /// `recovered` record and never touch a `triage` one.
+    #[serde(default = "default_source")]
+    pub source: String,
 }
+
+fn default_source() -> String {
+    "triage".into()
+}
+
+pub const SOURCE_TRIAGE: &str = "triage";
+pub const SOURCE_RECOVERED: &str = "recovered";
 
 /// A record plus the mutable state parsed back out of the markdown.
 #[derive(Debug, Clone, Serialize)]
@@ -93,6 +105,10 @@ pub fn load(v: &Path) -> Vec<EntryRecord> {
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<EntryRecord>(l).ok())
         .collect()
+}
+
+pub fn write_all_records(v: &Path, records: &[EntryRecord]) -> Result<()> {
+    write_all(v, records)
 }
 
 fn write_all(v: &Path, records: &[EntryRecord]) -> Result<()> {
@@ -147,6 +163,10 @@ pub fn task_state(v: &Path) -> HashMap<String, bool> {
         }
     }
     out
+}
+
+pub fn marker_id_of(line: &str) -> Option<String> {
+    marker_id(line)
 }
 
 /// Pull `{id}` out of an `<!-- e:{id} -->` marker.
@@ -234,6 +254,7 @@ mod tests {
             decisions: vec![],
             open: vec![],
             due: None,
+            source: SOURCE_TRIAGE.into(),
         }
     }
 

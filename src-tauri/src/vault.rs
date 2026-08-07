@@ -152,7 +152,7 @@ pub fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-fn valid_date(date: &str) -> Result<NaiveDate> {
+pub fn valid_date(date: &str) -> Result<NaiveDate> {
     NaiveDate::parse_from_str(date, "%Y-%m-%d")
         .with_context(|| format!("'{date}' is not a YYYY-MM-DD date"))
 }
@@ -915,6 +915,7 @@ pub fn append_idea(
     text: &str,
     date_fmt: &str,
     time_fmt: &str,
+    entry_id: &str,
     link: Option<&str>,
 ) -> Result<()> {
     valid_date(date)?;
@@ -931,8 +932,10 @@ pub fn append_idea(
         .filter(|l| !l.trim().is_empty())
         .map(|l| format!(" · [[{l}]]"))
         .unwrap_or_default();
+    // The marker is invisible when rendered, and it is what stops a rebuild from
+    // recovering a duplicate record for an idea that already has one.
     let bullet = format!(
-        "- **{display_time}** ({scope}) {}{link_bit}\n",
+        "- **{display_time}** <!-- e:{entry_id} --> ({scope}) {}{link_bit}\n",
         text.trim()
     );
 

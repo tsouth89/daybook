@@ -1,5 +1,6 @@
 mod ai;
 mod config;
+mod backfill;
 mod datetime;
 mod entries;
 mod vault;
@@ -121,6 +122,14 @@ fn query_entries(
     query: entries::EntryQuery,
 ) -> CmdResult<Vec<entries::EntryView>> {
     Ok(entries::query(&state.settings().vault(), &query))
+}
+
+/// Recover item records from markdown written before the index existed. Costs
+/// nothing — it parses the vault rather than re-triaging through the model.
+#[tauri::command]
+fn rebuild_entry_index(state: tauri::State<AppState>) -> CmdResult<backfill::RebuildReport> {
+    let s = state.settings();
+    backfill::rebuild(&s.vault(), &s.date_format).map_err(err)
 }
 
 #[tauri::command]
@@ -514,6 +523,7 @@ fn apply_triage(
                     &text,
                     date_fmt,
                     time_fmt,
+                    &entry_id,
                     link.as_deref(),
                 )
                 .map_err(err)?;
@@ -677,6 +687,7 @@ fn apply_triage(
             decisions: e.decisions.clone(),
             open: e.open.clone(),
             due: e.due.clone(),
+            source: entries::SOURCE_TRIAGE.into(),
         })
         .collect();
     entries::replace_item(v, &item.id, &records).map_err(err)?;
@@ -998,6 +1009,7 @@ pub fn run() {
             today_date,
             list_backlinks,
             query_entries,
+            rebuild_entry_index,
             save_attachment,
             attachment_data_url,
             hide_capture,
