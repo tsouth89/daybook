@@ -505,3 +505,24 @@ kbd {
 
 .pill.bad { color: var(--bad); border-color: var(--bad); }
 .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+.filterbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.filterselect { width: auto; padding: 4px 8px; font-size: 12px; }
+
+.entry-results { display: grid; gap: 10px; }
+.entry-hit {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--bg-2);
+}
+.entry-hit-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.entry-hit-body {
+  font-size: 12.5px; line-height: 1.55; margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.entry-hit .loop-list { margin-top: 6px; }

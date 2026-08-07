@@ -78,6 +78,8 @@ pub struct EntryQuery {
     pub kind: Option<String>,
     pub slug: Option<String>,
     pub date: Option<String>,
+    /// Case-insensitive match across the text an entry carries.
+    pub text: Option<String>,
     /// Inclusive ISO lower bound.
     pub since: Option<String>,
     /// Only entries carrying unresolved `open` loops.
@@ -221,6 +223,20 @@ fn marker_id(line: &str) -> Option<String> {
     }
 }
 
+/// Every string an entry carries is searchable, including the structured lists —
+/// "what did I decide about auth" should find a `decisions` bullet.
+fn matches_text(r: &EntryRecord, needle: &str) -> bool {
+    let direct = [&r.title, &r.body, &r.name, &r.slug]
+        .iter()
+        .any(|s| s.to_lowercase().contains(needle));
+    if direct {
+        return true;
+    }
+    [&r.accomplished, &r.decisions, &r.open]
+        .iter()
+        .any(|list| list.iter().any(|s| s.to_lowercase().contains(needle)))
+}
+
 pub fn query(v: &Path, q: &EntryQuery) -> Vec<EntryView> {
     let done_map = task_state(v);
     let mut out: Vec<EntryView> = load(v)
@@ -253,6 +269,12 @@ pub fn query(v: &Path, q: &EntryQuery) -> Vec<EntryView> {
             }
             if q.open_only && r.open.is_empty() {
                 return false;
+            }
+            if let Some(needle) = &q.text {
+                let needle = needle.trim().to_lowercase();
+                if !needle.is_empty() && !matches_text(r, &needle) {
+                    return false;
+                }
             }
             true
         })
@@ -425,6 +447,33 @@ mod tests {
         assert!(text.contains("Write tests"));
 
         assert!(set_task_done(&v, "no-such-id", true).is_err());
+    }
+
+    #[test]
+    fn text_search_reaches_into_the_structured_lists() {
+        let v = tmp();
+        crate::vault::ensure_vault(&v).unwrap();
+        let mut r = rec("cap-1-e0", "cap-1", "project", "daybook", "2026-08-06");
+        r.decisions = vec!["Kept raw append-only so rebuilds stay safe".into()];
+        r.open = vec!["Pick an index format".into()];
+        r.body = "Wired up the router.".into();
+        replace_item(&v, "cap-1", &[r]).unwrap();
+
+        let hit = |t: &str| {
+            query(
+                &v,
+                &EntryQuery {
+                    text: Some(t.into()),
+                    ..Default::default()
+                },
+            )
+            .len()
+        };
+        assert_eq!(hit("append-only"), 1, "decisions are searchable");
+        assert_eq!(hit("index format"), 1, "open loops are searchable");
+        assert_eq!(hit("ROUTER"), 1, "case-insensitive over body");
+        assert_eq!(hit("daybook"), 1, "slug is searchable");
+        assert_eq!(hit("nothing here"), 0);
     }
 
     #[test]

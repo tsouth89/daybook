@@ -106,6 +106,8 @@ export type EntryQuery = {
   kind?: string;
   slug?: string;
   date?: string;
+  /** Case-insensitive match across an entry's text, including its lists. */
+  text?: string;
   /** Inclusive ISO lower bound. */
   since?: string;
   /** Only entries carrying unresolved open loops. */
