@@ -3,17 +3,40 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, errText } from "./api";
 
-async function attachImageFile(
+function toBase64(buf: Uint8Array): string {
+  // Chunked because String.fromCharCode(...spread) blows the stack on big files.
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+/**
+ * Store a copy of a dropped file and reference it in the capture text. Images
+ * embed; anything else becomes a plain link, since `![]()` around a PDF just
+ * renders broken.
+ */
+async function attachFile(
   file: File,
   text: string,
   cursor: number
 ): Promise<{ text: string; cursor: number }> {
   const buf = new Uint8Array(await file.arrayBuffer());
-  let bin = "";
-  for (const b of buf) bin += String.fromCharCode(b);
-  const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
-  const rel = await api.saveAttachment(btoa(bin), ext);
-  const md = `\n![](${rel})\n`;
+  const b64 = toBase64(buf);
+  const isImage = file.type.startsWith("image/");
+
+  let rel: string;
+  if (isImage && !file.name) {
+    const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+    rel = await api.saveAttachment(b64, ext);
+  } else {
+    rel = await api.saveFileAttachment(b64, file.name || "file");
+  }
+
+  const label = file.name || rel.split("/").pop() || "file";
+  const md = isImage ? `\n![](${rel})\n` : `\n[${label}](${rel})\n`;
   const next = text.slice(0, cursor) + md + text.slice(cursor);
   return { text: next, cursor: cursor + md.length };
 }
@@ -65,28 +88,29 @@ export default function Capture() {
     api.hideCapture();
   }
 
-  async function ingestImage(file: File) {
-    if (!file.type.startsWith("image/")) return;
+  async function ingest(file: File) {
     try {
+      setStatus(`Storing ${file.name || "file"}…`);
       const at = ref.current?.selectionStart ?? text.length;
-      const next = await attachImageFile(file, text, at);
+      const next = await attachFile(file, text, at);
       setText(next.text);
-      setStatus("Image attached");
+      setStatus(file.type.startsWith("image/") ? "Image attached" : `Attached ${file.name}`);
       setTimeout(() => setStatus(null), 1500);
       ref.current?.focus();
     } catch (err) {
+      setStatus(null);
       setError(errText(err));
     }
   }
 
   async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const item = Array.from(e.clipboardData.items).find((i) =>
-      i.type.startsWith("image/")
+    const item = Array.from(e.clipboardData.items).find(
+      (i) => i.kind === "file"
     );
     if (!item) return;
     e.preventDefault();
     const file = item.getAsFile();
-    if (file) await ingestImage(file);
+    if (file) await ingest(file);
   }
 
   function onDragOver(e: React.DragEvent) {
@@ -103,9 +127,7 @@ export default function Capture() {
     e.preventDefault();
     setDragOver(false);
     for (const file of Array.from(e.dataTransfer.files)) {
-      if (file.type.startsWith("image/")) {
-        await ingestImage(file);
-      }
+      await ingest(file);
     }
   }
 
@@ -135,7 +157,7 @@ export default function Capture() {
         ref={ref}
         className="capture-input"
         value={text}
-        placeholder="Dictate, type, or drop images — lands in inbox"
+        placeholder="Dictate, type, or drop anything — lands in inbox"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
@@ -150,7 +172,7 @@ export default function Capture() {
           <span className="dim">
             {text.trim()
               ? `${text.trim().split(/\s+/).length} words`
-              : "Paste or drag images · markdown OK"}
+              : "Paste or drag files · markdown OK"}
           </span>
         )}
         <button className="btn primary" onClick={save} disabled={!text.trim()}>

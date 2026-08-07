@@ -1225,6 +1225,65 @@ pub fn save_attachment(v: &Path, bytes: &[u8], ext: &str) -> Result<String> {
     Ok(format!("attachments/{name}"))
 }
 
+pub fn is_image_ref(rel: &str) -> bool {
+    let lower = rel.to_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]
+        .iter()
+        .any(|e| lower.ends_with(e))
+}
+
+/// Store a copy of a dropped file under its own name. Notion's "drop anything
+/// in and it keeps a copy" only feels trustworthy if the name survives, so the
+/// original is preserved and only de-duplicated on collision.
+pub fn save_named_attachment(v: &Path, bytes: &[u8], filename: &str) -> Result<String> {
+    ensure_vault(v)?;
+    let raw = filename.rsplit(['/', '\\']).next().unwrap_or(filename);
+    let (stem, ext) = match raw.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, e),
+        _ => (raw, ""),
+    };
+    let clean = |s: &str, max: usize| -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .trim()
+            .replace("  ", " ")
+            .chars()
+            .take(max)
+            .collect()
+    };
+    let stem = clean(stem, 60);
+    let stem = if stem.trim().is_empty() { "file".into() } else { stem };
+    let ext: String = ext
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect::<String>()
+        .to_lowercase();
+
+    let name_for = |suffix: &str| {
+        if ext.is_empty() {
+            format!("{stem}{suffix}")
+        } else {
+            format!("{stem}{suffix}.{ext}")
+        }
+    };
+
+    let mut name = name_for("");
+    if attachments_dir(v).join(&name).exists() {
+        let stamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+        name = name_for(&format!("-{stamp}"));
+    }
+    std::fs::write(attachments_dir(v).join(&name), bytes)?;
+    Ok(format!("attachments/{name}"))
+}
+
 /// Markdown image refs like `![](attachments/foo.png)`.
 pub fn extract_attachment_refs(text: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -1277,7 +1336,14 @@ pub fn ensure_attachment_markdown(original: &str, body: &str) -> String {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str(&format!("![]({rel})"));
+        // An `![]()` around a PDF renders as a broken image, so only images get
+        // the embed; everything else becomes a plain link to the stored copy.
+        if is_image_ref(&rel) {
+            out.push_str(&format!("![]({rel})"));
+        } else {
+            let label = rel.rsplit('/').next().unwrap_or(&rel);
+            out.push_str(&format!("[{label}]({rel})"));
+        }
     }
     if !out.is_empty() {
         out.push('\n');

@@ -157,6 +157,8 @@ export const api = {
     invoke<void>("set_task_done", { entryId, done }),
   saveAttachment: (dataBase64: string, ext: string) =>
     invoke<string>("save_attachment", { dataBase64, ext }),
+  saveFileAttachment: (dataBase64: string, filename: string) =>
+    invoke<string>("save_file_attachment", { dataBase64, filename }),
   attachmentDataUrl: (rel: string) => invoke<string>("attachment_data_url", { rel }),
   hideCapture: () => invoke<void>("hide_capture"),
   showCapture: () => invoke<void>("show_capture"),

@@ -136,8 +136,9 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
          1. Never invent. Ambiguity stays ambiguous. Empty arrays are correct. A thin dump stays thin.\n\
          2. Preserve their voice in each entry's `body`. Fix transcription, add punctuation and \
          paragraph breaks, drop filler and false starts. Do not upgrade vocabulary or make it sound \
-         professional. Keep any markdown image references exactly as written \
-         (`![](attachments/...)`) in the entry they belong to — never drop or rewrite those paths.\n\
+         professional. Keep any markdown attachment references exactly as written — both images \
+         (`![](attachments/...)`) and file links (`[report.pdf](attachments/...)`) — in the entry \
+         they belong to. Never drop or rewrite those paths; they point at the only stored copy.\n\
          3. Split aggressively. One dump that mentions a bug fix, a dentist appointment, and a \
          side idea becomes three entries. Do not stuff unrelated things into one entry.\n\n\
          Scope and destination are independent axes:\n\

@@ -100,6 +100,13 @@ export default function Markdown({ text, extraMenu, onEdit }: Props) {
             const target = decodeURIComponent(href.slice("daybook://".length));
             const nav = pathToNav(target);
             if (nav) navigate(nav);
+            return;
+          }
+          // A stored file copy — hand it to the OS rather than the webview.
+          if (href.includes("attachments/") && !href.startsWith("data:")) {
+            e.preventDefault();
+            const rel = href.slice(href.indexOf("attachments/"));
+            void api.revealPath(decodeURIComponent(rel));
           }
         }}
         onContextMenu={(e) => {

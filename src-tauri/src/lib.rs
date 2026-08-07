@@ -157,6 +157,29 @@ fn save_attachment(
     vault::save_attachment(&state.settings().vault(), &bytes, &ext).map_err(err)
 }
 
+/// Store a copy of any dropped file, keeping its name.
+#[tauri::command]
+fn save_file_attachment(
+    state: tauri::State<AppState>,
+    data_base64: String,
+    filename: String,
+) -> CmdResult<String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("Bad file data: {e}"))?;
+    // Base64 over IPC is not the way to move a large file; fail clearly instead
+    // of hanging the capture window.
+    const MAX: usize = 64 * 1024 * 1024;
+    if bytes.len() > MAX {
+        return Err(format!(
+            "{filename} is {} MB; the limit is {} MB. Link to it instead.",
+            bytes.len() / 1024 / 1024,
+            MAX / 1024 / 1024
+        ));
+    }
+    vault::save_named_attachment(&state.settings().vault(), &bytes, &filename).map_err(err)
+}
+
 #[tauri::command]
 fn attachment_data_url(state: tauri::State<AppState>, rel: String) -> CmdResult<String> {
     vault::attachment_data_url(&state.settings().vault(), &rel).map_err(err)
@@ -1017,6 +1040,7 @@ pub fn run() {
             rebuild_entry_index,
             set_task_done,
             save_attachment,
+            save_file_attachment,
             attachment_data_url,
             hide_capture,
             show_capture,
