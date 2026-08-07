@@ -78,6 +78,43 @@ export type Backlink = {
   text: string;
 };
 
+/**
+ * One routed entry with its triage properties intact — the queryable half of
+ * the vault. `done` is parsed back out of the markdown, not stored.
+ */
+export type Entry = {
+  id: string;
+  item_id: string;
+  date: string;
+  time: string;
+  scope: "personal" | "work";
+  kind: "project" | "area" | "idea" | "task" | "note";
+  /** Owning project/area slug; empty when the entry belongs to nothing. */
+  slug: string;
+  name: string;
+  title: string;
+  body: string;
+  accomplished: string[];
+  decisions: string[];
+  open: string[];
+  due: string | null;
+  done: boolean;
+};
+
+export type EntryQuery = {
+  scope?: string;
+  kind?: string;
+  slug?: string;
+  date?: string;
+  /** Inclusive ISO lower bound. */
+  since?: string;
+  /** Only entries carrying unresolved open loops. */
+  open_only?: boolean;
+  /** Tasks only: drop the ones already ticked off. */
+  undone_only?: boolean;
+  limit?: number;
+};
+
 export type ItemProcessResult = {
   id: string;
   date: string;
@@ -107,6 +144,8 @@ export const api = {
   todayDate: () => invoke<string>("today_date"),
   listBacklinks: (target: string) =>
     invoke<Backlink[]>("list_backlinks", { target }),
+  queryEntries: (query: EntryQuery = {}) =>
+    invoke<Entry[]>("query_entries", { query }),
   saveAttachment: (dataBase64: string, ext: string) =>
     invoke<string>("save_attachment", { dataBase64, ext }),
   attachmentDataUrl: (rel: string) => invoke<string>("attachment_data_url", { rel }),

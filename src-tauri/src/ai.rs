@@ -97,6 +97,19 @@ fn json_example() -> &'static str {
       "due": null
     },
     {
+      "scope": "work",
+      "kind": "task",
+      "slug": "daybook",
+      "name": "Daybook",
+      "is_new": false,
+      "title": "Write tests for the routing",
+      "body": "Still need tests around the inbox routing before this is done.",
+      "accomplished": [],
+      "decisions": [],
+      "open": [],
+      "due": null
+    },
+    {
       "scope": "personal",
       "kind": "task",
       "slug": "",
@@ -141,6 +154,12 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
          For project/area entries: fill `accomplished` / `decisions` / `open` when present. \
          Decisions should keep the reason if one was given. For tasks, set `due` to YYYY-MM-DD \
          when a date is clear; otherwise null. `title` is a short label (a few words).\n\n\
+         `slug` and `name` are not just for project/area entries. A task or idea that belongs to \
+         a project or area must carry that project's `slug` and `name` too — \"still need to write \
+         tests for it\" said while discussing the BMX site is a `task` that belongs to `bmx-site`. \
+         Leave `slug` and `name` empty only when the entry genuinely belongs to nothing (\"book a \
+         dentist appointment\"). This is what lets a task be found from its project later, so do \
+         not leave it empty out of caution when the owner is clear from the dump.\n\n\
          `summary` is 1–3 plain glance bullets for the whole dump — the only place you write \
          rather than transcribe.\n\n\
          Respond with a single JSON object matching this schema example:\n",

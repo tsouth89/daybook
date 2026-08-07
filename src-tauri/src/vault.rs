@@ -905,6 +905,8 @@ pub fn list_projects(v: &Path) -> Result<Vec<ProjectEntry>> {
 // ----------------------------------------------------------- ideas / tasks
 
 /// Append a dated idea bullet. Ideas are maybe-someday; they don't own a file.
+/// Append an idea. `link` is the owning `projects/slug` or `areas/slug` when the
+/// idea belongs to something, so it stops floating free of its project.
 pub fn append_idea(
     v: &Path,
     date: &str,
@@ -913,6 +915,7 @@ pub fn append_idea(
     text: &str,
     date_fmt: &str,
     time_fmt: &str,
+    link: Option<&str>,
 ) -> Result<()> {
     valid_date(date)?;
     ensure_vault(v)?;
@@ -924,7 +927,14 @@ pub fn append_idea(
 
     let display_date = crate::datetime::format_date(date, date_fmt);
     let display_time = crate::datetime::format_time(time, time_fmt);
-    let bullet = format!("- **{display_time}** ({scope}) {}\n", text.trim());
+    let link_bit = link
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| format!(" · [[{l}]]"))
+        .unwrap_or_default();
+    let bullet = format!(
+        "- **{display_time}** ({scope}) {}{link_bit}\n",
+        text.trim()
+    );
 
     // Match an existing ## heading for the same calendar day (any display format).
     let mut insert_at: Option<usize> = None;
@@ -953,6 +963,9 @@ pub fn append_idea(
 }
 
 /// Append an open task checkbox with capture date. `due` is optional YYYY-MM-DD.
+/// Append a task. `entry_id` is carried in an HTML comment so the checkbox can
+/// be matched back to its record — ticking the box in Obsidian has to count.
+/// `link` is the owning `projects/slug` or `areas/slug`, if the task has one.
 pub fn append_task(
     v: &Path,
     date: &str,
@@ -960,6 +973,8 @@ pub fn append_task(
     text: &str,
     due: Option<&str>,
     date_fmt: &str,
+    entry_id: &str,
+    link: Option<&str>,
 ) -> Result<()> {
     valid_date(date)?;
     if let Some(d) = due {
@@ -975,8 +990,12 @@ pub fn append_task(
     let due_bit = due
         .map(|d| format!(" · due {}", crate::datetime::format_date(d, date_fmt)))
         .unwrap_or_default();
+    let link_bit = link
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| format!(" · [[{l}]]"))
+        .unwrap_or_default();
     existing.push_str(&format!(
-        "- [ ] ({scope}) {} — captured {captured}{due_bit}\n",
+        "- [ ] <!-- e:{entry_id} --> ({scope}) {} — captured {captured}{due_bit}{link_bit}\n",
         text.trim()
     ));
     std::fs::write(&path, existing)?;

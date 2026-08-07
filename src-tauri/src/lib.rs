@@ -1,6 +1,7 @@
 mod ai;
 mod config;
 mod datetime;
+mod entries;
 mod vault;
 
 use base64::Engine;
@@ -87,7 +88,11 @@ fn list_inbox(state: tauri::State<AppState>) -> CmdResult<Vec<vault::InboxItem>>
 
 #[tauri::command]
 fn delete_inbox_item(state: tauri::State<AppState>, id: String) -> CmdResult<()> {
-    vault::delete_inbox_item(&state.settings().vault(), &id).map_err(err)
+    let v = state.settings().vault();
+    // Discarding is also the escape hatch for a bad triage, so drop any records
+    // the capture left behind rather than leaving them orphaned in the index.
+    entries::remove_item(&v, &id).map_err(err)?;
+    vault::delete_inbox_item(&v, &id).map_err(err)
 }
 
 #[tauri::command]
@@ -106,6 +111,16 @@ fn ensure_day(state: tauri::State<AppState>, date: Option<String>) -> CmdResult<
 #[tauri::command]
 fn today_date() -> String {
     vault::today()
+}
+
+/// Query the item layer. This is what views are built from — filter by project,
+/// scope, kind, or open loops instead of grepping prose.
+#[tauri::command]
+fn query_entries(
+    state: tauri::State<AppState>,
+    query: entries::EntryQuery,
+) -> CmdResult<Vec<entries::EntryView>> {
+    Ok(entries::query(&state.settings().vault(), &query))
 }
 
 #[tauri::command]
@@ -441,7 +456,32 @@ fn apply_triage(
         std::collections::HashMap::new();
     // key -> (kind, name, scope, body)
 
+    // Resolve slug -> kind up front, including entities this very capture is
+    // creating, so a task can link to a project that does not exist yet.
+    let mut slug_kind: std::collections::HashMap<String, String> = known
+        .iter()
+        .map(|k| (k.slug.clone(), k.kind.clone()))
+        .collect();
     for e in &triage.entries {
+        if (e.kind == "project" || e.kind == "area") && !e.slug.trim().is_empty() {
+            slug_kind.insert(e.slug.clone(), e.kind.clone());
+        }
+    }
+    let link_for = |slug: &str| -> Option<String> {
+        let slug = slug.trim();
+        if slug.is_empty() {
+            return None;
+        }
+        let dir = match slug_kind.get(slug).map(|s| s.as_str()) {
+            Some("area") => "areas",
+            _ => "projects",
+        };
+        Some(format!("{dir}/{slug}"))
+    };
+
+    for (n, e) in triage.entries.iter().enumerate() {
+        let entry_id = entries::entry_id(&item.id, n);
+        let link = link_for(&e.slug);
         match e.kind.as_str() {
             "project" | "area" => {
                 let key = format!("{}:{}", e.kind, e.slug);
@@ -474,6 +514,7 @@ fn apply_triage(
                     &text,
                     date_fmt,
                     time_fmt,
+                    link.as_deref(),
                 )
                 .map_err(err)?;
                 destinations.push(format!("idea ({})", e.scope));
@@ -484,8 +525,17 @@ fn apply_triage(
                 } else {
                     e.title.trim()
                 };
-                vault::append_task(v, &item.date, &e.scope, label, e.due.as_deref(), date_fmt)
-                    .map_err(err)?;
+                vault::append_task(
+                    v,
+                    &item.date,
+                    &e.scope,
+                    label,
+                    e.due.as_deref(),
+                    date_fmt,
+                    &entry_id,
+                    link.as_deref(),
+                )
+                .map_err(err)?;
                 destinations.push(format!("task ({})", e.scope));
             }
             _ => {
@@ -605,6 +655,31 @@ fn apply_triage(
         time_fmt,
     )
     .map_err(err)?;
+
+    // Keep the structured record. The markdown above is the readable half; this
+    // is what makes "everything open on Daybook" a query instead of a grep.
+    let records: Vec<entries::EntryRecord> = triage
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(n, e)| entries::EntryRecord {
+            id: entries::entry_id(&item.id, n),
+            item_id: item.id.clone(),
+            date: item.date.clone(),
+            time: item.time.clone(),
+            scope: e.scope.clone(),
+            kind: e.kind.clone(),
+            slug: e.slug.clone(),
+            name: e.name.clone(),
+            title: e.title.clone(),
+            body: e.body.clone(),
+            accomplished: e.accomplished.clone(),
+            decisions: e.decisions.clone(),
+            open: e.open.clone(),
+            due: e.due.clone(),
+        })
+        .collect();
+    entries::replace_item(v, &item.id, &records).map_err(err)?;
 
     let day_body = vault::ensure_attachment_markdown(
         &item.text,
@@ -922,6 +997,7 @@ pub fn run() {
             ensure_day,
             today_date,
             list_backlinks,
+            query_entries,
             save_attachment,
             attachment_data_url,
             hide_capture,

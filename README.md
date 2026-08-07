@@ -29,7 +29,29 @@ attachments/               pasted images
 config/projects.json       known projects/areas + aliases
 config/glossary.txt        jargon list, repairs dictation errors
 config/profile.md          durable facts about you, fed to every pass
+config/entries.jsonl       structured record of every routed entry (build artifact)
 ```
+
+## Two halves
+
+Daybook is trying to be Notion on the way in and Obsidian on the way out, which
+means every capture has to end up in two places at once:
+
+- **The markdown is the readable half.** Day notes, project pages, `tasks.md` —
+  plain files you can edit by hand, here or in Obsidian.
+- **`config/entries.jsonl` is the queryable half.** Triage already computes
+  `scope`, `slug`, `due`, and per-project `accomplished` / `decisions` / `open`
+  for every entry; those properties are kept rather than flattened into prose,
+  so "everything open on Daybook" is a filter instead of a grep.
+
+Properties split by who owns them. **Capture-time facts** come from triage and
+live in the index. **Mutable state** — a task being done — lives in the markdown
+and is parsed back, because ticking a checkbox in Obsidian has to count. Tasks
+carry an `<!-- e:id -->` marker so the box can be matched to its record, and a
+`[[projects/slug]]` link so the task is reachable from the project it belongs to.
+
+The index is a build artifact like everything else outside `raw/`: delete it and
+it rebuilds. A malformed line is skipped rather than fatal.
 
 **Scope and destination are independent.** Every entry gets a scope (`personal` or
 `work`) and a destination (`project`, `area`, `idea`, `task`, or day-only `note`).
