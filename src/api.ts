@@ -165,6 +165,11 @@ export const api = {
     invoke<Entry[]>("query_entries", { query }),
   rebuildEntryIndex: () => invoke<RebuildReport>("rebuild_entry_index"),
   askVault: (question: string) => invoke<AskAnswer>("ask_vault", { question }),
+  updateEntry: (entry: Entry) => invoke<void>("update_entry", { entry }),
+  createEntry: (entry: Entry) => invoke<Entry>("create_entry", { entry }),
+  deleteEntry: (entryId: string) => invoke<void>("delete_entry", { entryId }),
+  resolveOpenLoop: (entryId: string, line: string) =>
+    invoke<void>("resolve_open_loop", { entryId, line }),
   setTaskDone: (entryId: string, done: boolean) =>
     invoke<void>("set_task_done", { entryId, done }),
   saveAttachment: (dataBase64: string, ext: string) =>

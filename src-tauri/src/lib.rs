@@ -163,6 +163,37 @@ async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> CmdRe
     Ok(AskAnswer { answer, used })
 }
 
+/// Correct what triage got wrong. Without this the index is a set of claims you
+/// cannot argue with — hand-editing the markdown would not reach these fields.
+#[tauri::command]
+fn update_entry(state: tauri::State<AppState>, entry: entries::EntryRecord) -> CmdResult<()> {
+    let s = state.settings();
+    entries::update_entry(&s.vault(), &entry, &s.date_format).map_err(err)
+}
+
+#[tauri::command]
+fn create_entry(
+    state: tauri::State<AppState>,
+    entry: entries::EntryRecord,
+) -> CmdResult<entries::EntryRecord> {
+    let s = state.settings();
+    entries::create_entry(&s.vault(), entry, &s.date_format).map_err(err)
+}
+
+#[tauri::command]
+fn delete_entry(state: tauri::State<AppState>, entry_id: String) -> CmdResult<()> {
+    entries::delete_entry(&state.settings().vault(), &entry_id).map_err(err)
+}
+
+#[tauri::command]
+fn resolve_open_loop(
+    state: tauri::State<AppState>,
+    entry_id: String,
+    line: String,
+) -> CmdResult<()> {
+    entries::resolve_open(&state.settings().vault(), &entry_id, &line).map_err(err)
+}
+
 /// Recover item records from markdown written before the index existed. Costs
 /// nothing — it parses the vault rather than re-triaging through the model.
 #[tauri::command]
@@ -1075,6 +1106,10 @@ pub fn run() {
             query_entries,
             rebuild_entry_index,
             ask_vault,
+            update_entry,
+            create_entry,
+            delete_entry,
+            resolve_open_loop,
             set_task_done,
             save_attachment,
             save_file_attachment,

@@ -986,6 +986,39 @@ pub fn append_idea(
 }
 
 /// Append an open task checkbox with capture date. `due` is optional YYYY-MM-DD.
+/// Render one task line. Shared by append and rewrite so a task edited in the
+/// app comes out byte-identical to one written at capture time.
+pub fn format_task_line(
+    done: bool,
+    entry_id: &str,
+    scope: &str,
+    text: &str,
+    date: &str,
+    due: Option<&str>,
+    link: Option<&str>,
+    date_fmt: &str,
+) -> String {
+    let captured = crate::datetime::format_date(date, date_fmt);
+    let due_bit = due
+        .filter(|d| !d.trim().is_empty())
+        .map(|d| format!(" · due {}", crate::datetime::format_date(d, date_fmt)))
+        .unwrap_or_default();
+    let link_bit = link
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| format!(" · [[{l}]]"))
+        .unwrap_or_default();
+    let box_ = if done { "x" } else { " " };
+    let scope_bit = if scope.trim().is_empty() {
+        String::new()
+    } else {
+        format!("({scope}) ")
+    };
+    format!(
+        "- [{box_}] <!-- e:{entry_id} --> {scope_bit}{} — captured {captured}{due_bit}{link_bit}",
+        text.trim()
+    )
+}
+
 /// Append a task. `entry_id` is carried in an HTML comment so the checkbox can
 /// be matched back to its record — ticking the box in Obsidian has to count.
 /// `link` is the owning `projects/slug` or `areas/slug`, if the task has one.
@@ -1009,18 +1042,10 @@ pub fn append_task(
     if !existing.ends_with('\n') {
         existing.push('\n');
     }
-    let captured = crate::datetime::format_date(date, date_fmt);
-    let due_bit = due
-        .map(|d| format!(" · due {}", crate::datetime::format_date(d, date_fmt)))
-        .unwrap_or_default();
-    let link_bit = link
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| format!(" · [[{l}]]"))
-        .unwrap_or_default();
-    existing.push_str(&format!(
-        "- [ ] <!-- e:{entry_id} --> ({scope}) {} — captured {captured}{due_bit}{link_bit}\n",
-        text.trim()
+    existing.push_str(&format_task_line(
+        false, entry_id, scope, text, date, due, link, date_fmt,
     ));
+    existing.push('\n');
     std::fs::write(&path, existing)?;
     Ok(())
 }

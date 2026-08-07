@@ -7,6 +7,7 @@ import {
   type ProjectEntry,
 } from "../api";
 import { ContextMenu, useContextMenu } from "../ContextMenu";
+import EntryEditor, { blankEntry } from "../EntryEditor";
 import { useFormat } from "../FormatContext";
 import ProcessResult from "../ProcessResult";
 import { useNavigate } from "../nav";
@@ -54,6 +55,7 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
   const [scanning, setScanning] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [result, setResult] = useState<InboxProcessResult | null>(null);
+  const [editing, setEditing] = useState<Entry | null>(null);
   const menu = useContextMenu();
   const fmt = useFormat();
   const navigate = useNavigate();
@@ -139,6 +141,16 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
 
   useViewHandlers({ process: () => void process() });
 
+  async function resolveLoop(entry: Entry, line: string) {
+    try {
+      await api.resolveOpenLoop(entry.id, line);
+      onNotice?.("Closed");
+      await load();
+    } catch (e) {
+      onError(errText(e));
+    }
+  }
+
   async function toggleTask(entry: Entry) {
     try {
       await api.setTaskDone(entry.id, !entry.done);
@@ -192,14 +204,32 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
 
   function taskRow(t: Entry, flag?: "overdue" | "today") {
     return (
-      <li key={t.id} className="task-row">
+      <li
+        key={t.id}
+        className="task-row"
+        onContextMenu={(ev) =>
+          menu.open(ev, [
+            { label: "Edit…", onClick: () => setEditing(t) },
+            {
+              label: t.done ? "Mark not done" : "Mark done",
+              onClick: () => void toggleTask(t),
+            },
+          ])
+        }
+      >
         <input
           type="checkbox"
           checked={t.done}
           onChange={() => void toggleTask(t)}
           aria-label={t.title}
         />
-        <span className="task-text">{t.title}</span>
+        <span
+          className="task-text clickable-text"
+          onDoubleClick={() => setEditing(t)}
+          title="Double-click to edit"
+        >
+          {t.title}
+        </span>
         {flag === "overdue" && t.due && (
           <span className="pill bad">overdue {fmt.date(t.due)}</span>
         )}
@@ -223,7 +253,8 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
       onContextMenu={(e) => {
         if ((e.target as HTMLElement).closest("button, input, .ctxmenu")) return;
         menu.open(e, [
-          { label: "New entry", onClick: () => void api.showCapture() },
+          { label: "Capture…", onClick: () => void api.showCapture() },
+          { label: "Add entry by hand…", onClick: () => setEditing(blankEntry(date)) },
           {
             label: `Process today (${pending})`,
             disabled: busy || pending === 0,
@@ -261,7 +292,10 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
         </div>
         <div className="grow" />
         <button className="btn" onClick={() => api.showCapture()}>
-          New entry
+          Capture
+        </button>
+        <button className="btn" onClick={() => setEditing(blankEntry(date))}>
+          Add task
         </button>
         <button
           className="btn primary"
@@ -313,9 +347,16 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
                   <ul className="loop-list">
                     {g.entries.flatMap((e) =>
                       e.open.map((line, i) => (
-                        <li key={`${e.id}-${i}`}>
-                          <span>{line}</span>
-                          <span className="dim tiny"> · {fmt.date(e.date)}</span>
+                        <li key={`${e.id}-${i}`} className="loop-row">
+                          <span className="loop-text">{line}</span>
+                          <span className="dim tiny">{fmt.date(e.date)}</span>
+                          <button
+                            className="loop-close"
+                            title="Close this loop"
+                            onClick={() => void resolveLoop(e, line)}
+                          >
+                            ✓
+                          </button>
                         </li>
                       ))
                     )}
@@ -393,6 +434,14 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
         </div>
       )}
       <ContextMenu {...menu.menuProps} />
+      <EntryEditor
+        entry={editing}
+        projects={projects}
+        onClose={() => setEditing(null)}
+        onSaved={() => void load()}
+        onError={onError}
+        onNotice={onNotice}
+      />
     </div>
   );
 }

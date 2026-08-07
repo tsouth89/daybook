@@ -7,6 +7,7 @@ import {
   type SearchHit,
 } from "../api";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
+import EntryEditor from "../EntryEditor";
 import { useFormat } from "../FormatContext";
 import { pathToNav, useNavigate } from "../nav";
 
@@ -34,6 +35,7 @@ export default function SearchView({
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [ran, setRan] = useState(false);
+  const [editing, setEditing] = useState<Entry | null>(null);
   const menu = useContextMenu();
   const navigate = useNavigate();
   const fmt = useFormat();
@@ -184,10 +186,11 @@ export default function SearchView({
               <div
                 key={e.id}
                 className="entry-hit"
-                onDoubleClick={() => openEntry(e)}
+                onDoubleClick={() => setEditing(e)}
                 onContextMenu={(ev) =>
                   menu.open(ev, [
                     { label: "Open", onClick: () => openEntry(e) },
+                    { label: "Edit…", onClick: () => setEditing(e) },
                     {
                       label: "Open the day",
                       onClick: () => navigate({ type: "day", date: e.date, pane: "note" }),
@@ -275,6 +278,14 @@ export default function SearchView({
         )}
       </div>
       <ContextMenu {...menu.menuProps} />
+      <EntryEditor
+        entry={editing}
+        projects={projects}
+        onClose={() => setEditing(null)}
+        onSaved={() => void run()}
+        onError={onError}
+        onNotice={onNotice}
+      />
     </div>
   );
 }

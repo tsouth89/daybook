@@ -450,6 +450,121 @@ mod tests {
     }
 
     #[test]
+    fn correcting_a_task_updates_both_halves() {
+        let v = tmp();
+        let created = create_entry(
+            &v,
+            EntryRecord {
+                kind: "task".into(),
+                scope: "work".into(),
+                title: "Write tests".into(),
+                date: "2026-08-06".into(),
+                ..rec("", "", "task", "", "2026-08-06")
+            },
+            "DD/MM/YYYY",
+        )
+        .unwrap();
+
+        // Triage guessed the wrong project and no due date; fix both.
+        let mut fixed = created.clone();
+        fixed.slug = "daybook".into();
+        fixed.due = Some("2026-08-12".into());
+        fixed.title = "Write tests for routing".into();
+        update_entry(&v, &fixed, "DD/MM/YYYY").unwrap();
+
+        // The index changed...
+        let stored = load(&v).into_iter().find(|r| r.id == created.id).unwrap();
+        assert_eq!(stored.slug, "daybook");
+        assert_eq!(stored.due.as_deref(), Some("2026-08-12"));
+
+        // ...and so did the markdown, which is the half you read in Obsidian.
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(text.contains("Write tests for routing"), "got: {text}");
+        assert!(text.contains("[[projects/daybook]]"), "got: {text}");
+        assert!(text.contains("due 12/08/2026"), "got: {text}");
+        assert_eq!(text.matches("<!-- e:").count(), 1, "no duplicate line");
+    }
+
+    #[test]
+    fn editing_a_task_keeps_it_ticked() {
+        let v = tmp();
+        let created = create_entry(
+            &v,
+            EntryRecord {
+                kind: "task".into(),
+                title: "Ship it".into(),
+                ..rec("", "", "task", "", "2026-08-06")
+            },
+            "DD/MM/YYYY",
+        )
+        .unwrap();
+        set_task_done(&v, &created.id, true).unwrap();
+
+        let mut edited = created.clone();
+        edited.title = "Ship it properly".into();
+        update_entry(&v, &edited, "DD/MM/YYYY").unwrap();
+
+        assert_eq!(task_state(&v).get(&created.id), Some(&true), "still done");
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(text.contains("Ship it properly"));
+    }
+
+    #[test]
+    fn deleting_a_task_removes_its_line_too() {
+        let v = tmp();
+        let created = create_entry(
+            &v,
+            EntryRecord {
+                kind: "task".into(),
+                title: "Wrong entirely".into(),
+                ..rec("", "", "task", "", "2026-08-06")
+            },
+            "DD/MM/YYYY",
+        )
+        .unwrap();
+        delete_entry(&v, &created.id).unwrap();
+
+        assert!(load(&v).is_empty());
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(!text.contains("Wrong entirely"), "got: {text}");
+        assert!(delete_entry(&v, &created.id).is_err(), "second delete reports");
+    }
+
+    #[test]
+    fn an_open_loop_can_be_closed() {
+        let v = tmp();
+        crate::vault::ensure_vault(&v).unwrap();
+        let mut r = rec("cap-1-e0", "cap-1", "project", "daybook", "2026-08-06");
+        r.open = vec!["Pick an index format".into(), "Decide on backfill".into()];
+        replace_item(&v, "cap-1", &[r]).unwrap();
+
+        resolve_open(&v, "cap-1-e0", "Pick an index format").unwrap();
+        let stored = load(&v).into_iter().next().unwrap();
+        assert_eq!(stored.open, vec!["Decide on backfill"]);
+        assert!(resolve_open(&v, "cap-1-e0", "not a real loop").is_err());
+    }
+
+    #[test]
+    fn update_cannot_rewrite_provenance() {
+        let v = tmp();
+        crate::vault::ensure_vault(&v).unwrap();
+        let mut original = rec("cap-1-e0", "cap-1", "note", "", "2026-08-06");
+        original.source = SOURCE_RECOVERED.into();
+        replace_item(&v, "cap-1", &[original.clone()]).unwrap();
+
+        let mut sneaky = original.clone();
+        sneaky.item_id = "someone-else".into();
+        sneaky.source = SOURCE_TRIAGE.into();
+        sneaky.title = "New title".into();
+        update_entry(&v, &sneaky, "DD/MM/YYYY").unwrap();
+
+        let stored = load(&v).into_iter().next().unwrap();
+        assert_eq!(stored.title, "New title", "editable fields still apply");
+        assert_eq!(stored.item_id, "cap-1", "identity is not the caller's to set");
+        assert_eq!(stored.source, SOURCE_RECOVERED, "provenance is preserved");
+    }
+
+    #[test]
     fn retrieval_ranks_relevant_entries_and_drops_the_rest() {
         let v = tmp();
         crate::vault::ensure_vault(&v).unwrap();
@@ -647,4 +762,217 @@ pub fn as_context(records: &[EntryRecord]) -> String {
         out.push('\n');
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Editing. Triage's first guess has to be correctable, or the index becomes a
+// set of claims you cannot argue with.
+// ---------------------------------------------------------------------------
+
+/// Where a task's owning project link points, given the vault's known entities.
+fn link_for(v: &Path, slug: &str) -> Option<String> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return None;
+    }
+    let dir = match crate::vault::read_projects_config(v)
+        .into_iter()
+        .find(|m| m.slug == slug)
+        .map(|m| m.kind)
+        .as_deref()
+    {
+        Some("area") => "areas",
+        _ => "projects",
+    };
+    Some(format!("{dir}/{slug}"))
+}
+
+/// Rewrite the `tasks.md` line for a record, preserving its done state. The
+/// line is a pure rendering of the record, so it is regenerated rather than
+/// patched field by field.
+fn rewrite_task_line(v: &Path, r: &EntryRecord, date_fmt: &str) -> Result<()> {
+    let path = crate::vault::tasks_path(v);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let mut found = false;
+    let out: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if found || marker_id(line).as_deref() != Some(r.id.as_str()) {
+                return line.to_string();
+            }
+            let t = line.trim_start();
+            if !(t.starts_with("- [") ) {
+                return line.to_string();
+            }
+            found = true;
+            let done = t.starts_with("- [x]") || t.starts_with("- [X]");
+            let indent = &line[..line.len() - t.len()];
+            format!(
+                "{indent}{}",
+                crate::vault::format_task_line(
+                    done,
+                    &r.id,
+                    &r.scope,
+                    &r.title,
+                    &r.date,
+                    r.due.as_deref(),
+                    link_for(v, &r.slug).as_deref(),
+                    date_fmt,
+                )
+            )
+        })
+        .collect();
+    if !found {
+        return Ok(());
+    }
+    let mut joined = out.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    std::fs::write(&path, joined)?;
+    Ok(())
+}
+
+fn remove_task_line(v: &Path, entry_id: &str) -> Result<()> {
+    let path = crate::vault::tasks_path(v);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|l| marker_id(l).as_deref() != Some(entry_id))
+        .collect();
+    let mut joined = kept.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    std::fs::write(&path, joined)?;
+    Ok(())
+}
+
+/// Replace one record wholesale. The caller sends the whole edited record back
+/// rather than a patch — this is a single-user local app, and read-modify-write
+/// on one file avoids inventing a merge story for no benefit.
+pub fn update_entry(v: &Path, updated: &EntryRecord, date_fmt: &str) -> Result<()> {
+    let mut all = load(v);
+    let Some(slot) = all.iter_mut().find(|r| r.id == updated.id) else {
+        anyhow::bail!("No entry with id {}", updated.id);
+    };
+    // Identity and provenance are not the caller's to change.
+    let mut next = updated.clone();
+    next.item_id = slot.item_id.clone();
+    next.source = slot.source.clone();
+    if next.kind.trim().is_empty() {
+        next.kind = slot.kind.clone();
+    }
+    if next.date.trim().is_empty() {
+        next.date = slot.date.clone();
+    }
+    if let Some(d) = &next.due {
+        if d.trim().is_empty() {
+            next.due = None;
+        } else {
+            crate::vault::valid_date(d)?;
+        }
+    }
+    crate::vault::valid_date(&next.date)?;
+    *slot = next.clone();
+    all.sort_by(|a, b| (&a.date, &a.time, &a.id).cmp(&(&b.date, &b.time, &b.id)));
+    write_all(v, &all)?;
+
+    if next.kind == "task" {
+        rewrite_task_line(v, &next, date_fmt)?;
+    }
+    Ok(())
+}
+
+/// Drop one entry. For tasks the markdown line goes too, since it is a pure
+/// rendering; other kinds leave their prose alone because you may have edited it.
+pub fn delete_entry(v: &Path, entry_id: &str) -> Result<()> {
+    let mut all = load(v);
+    let before = all.len();
+    let was_task = all
+        .iter()
+        .find(|r| r.id == entry_id)
+        .map(|r| r.kind == "task")
+        .unwrap_or(false);
+    all.retain(|r| r.id != entry_id);
+    if all.len() == before {
+        anyhow::bail!("No entry with id {entry_id}");
+    }
+    write_all(v, &all)?;
+    if was_task {
+        remove_task_line(v, entry_id)?;
+    }
+    Ok(())
+}
+
+/// Close one open loop. These are the things Home nags about, so being able to
+/// say "that's settled" without editing prose is the whole point of listing them.
+pub fn resolve_open(v: &Path, entry_id: &str, line: &str) -> Result<()> {
+    let mut all = load(v);
+    let Some(slot) = all.iter_mut().find(|r| r.id == entry_id) else {
+        anyhow::bail!("No entry with id {entry_id}");
+    };
+    let before = slot.open.len();
+    slot.open.retain(|o| o.trim() != line.trim());
+    if slot.open.len() == before {
+        anyhow::bail!("That loop is not on entry {entry_id}");
+    }
+    write_all(v, &all)
+}
+
+/// Create an entry by hand, with no capture behind it. Notion lets you just add
+/// a row; requiring dictation for every task would be a strange thing to insist on.
+pub fn create_entry(v: &Path, mut r: EntryRecord, date_fmt: &str) -> Result<EntryRecord> {
+    crate::vault::ensure_vault(v)?;
+    if r.date.trim().is_empty() {
+        r.date = crate::vault::today();
+    }
+    crate::vault::valid_date(&r.date)?;
+    if let Some(d) = &r.due {
+        if d.trim().is_empty() {
+            r.due = None;
+        } else {
+            crate::vault::valid_date(d)?;
+        }
+    }
+    if r.title.trim().is_empty() {
+        anyhow::bail!("Give it a title.");
+    }
+    if r.kind.trim().is_empty() {
+        r.kind = "note".into();
+    }
+    if r.scope.trim().is_empty() {
+        r.scope = "personal".into();
+    }
+
+    let stamp = chrono::Local::now().format("%H%M%S").to_string();
+    r.item_id = format!("manual-{}-{}", r.date, stamp);
+    r.id = format!("{}-e0", r.item_id);
+    r.source = SOURCE_TRIAGE.into();
+    if r.time.trim().is_empty() {
+        r.time = chrono::Local::now().format("%H:%M").to_string();
+    }
+
+    if r.kind == "task" {
+        crate::vault::append_task(
+            v,
+            &r.date,
+            &r.scope,
+            &r.title,
+            r.due.as_deref(),
+            date_fmt,
+            &r.id,
+            link_for(v, &r.slug).as_deref(),
+        )?;
+    }
+
+    let mut all = load(v);
+    all.push(r.clone());
+    all.sort_by(|a, b| (&a.date, &a.time, &a.id).cmp(&(&b.date, &b.time, &b.id)));
+    write_all(v, &all)?;
+    Ok(r)
 }
