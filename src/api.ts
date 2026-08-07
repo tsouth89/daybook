@@ -145,6 +145,26 @@ export type TrashItem = {
   payload: TrashPayload;
 };
 
+export type Objective = { text: string; done: boolean };
+
+/** Everything the home screen shows for one project, in one call. */
+export type ProjectSummary = {
+  slug: string;
+  name: string;
+  kind: string;
+  scope: string;
+  status: string;
+  parent: string;
+  /** `## What this is`; empty when never described. */
+  about: string;
+  objectives: Objective[];
+  /** Unresolved loops across this project's entries. */
+  now: string[];
+  open_tasks: number;
+  overdue_tasks: number;
+  last_date: string;
+};
+
 export type RebuildReport = {
   recovered: number;
   kept: number;
@@ -191,6 +211,15 @@ export const api = {
   deleteEntry: (entryId: string) => invoke<void>("delete_entry", { entryId }),
   resolveOpenLoop: (entryId: string, line: string) =>
     invoke<void>("resolve_open_loop", { entryId, line }),
+  projectSummaries: () => invoke<ProjectSummary[]>("project_summaries"),
+  setEntityAbout: (kind: string, slug: string, body: string) =>
+    invoke<void>("set_entity_about", { kind, slug, body }),
+  setObjectiveDone: (kind: string, slug: string, index: number, done: boolean) =>
+    invoke<void>("set_objective_done", { kind, slug, index, done }),
+  addObjective: (kind: string, slug: string, text: string) =>
+    invoke<void>("add_objective", { kind, slug, text }),
+  removeObjective: (kind: string, slug: string, index: number) =>
+    invoke<void>("remove_objective", { kind, slug, index }),
   listTrash: () => invoke<TrashItem[]>("list_trash"),
   restoreTrash: (id: string) => invoke<string>("restore_trash", { id }),
   purgeTrash: (id: string) => invoke<void>("purge_trash", { id }),

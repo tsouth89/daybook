@@ -271,6 +271,54 @@ fn resolve_open_loop(
     Ok(())
 }
 
+/// Everything the home screen shows, in one call.
+#[tauri::command]
+fn project_summaries(state: tauri::State<AppState>) -> CmdResult<Vec<vault::ProjectSummary>> {
+    let v = state.settings().vault();
+    Ok(vault::project_summaries(&v, &vault::today()))
+}
+
+#[tauri::command]
+fn set_entity_about(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+    body: String,
+) -> CmdResult<()> {
+    vault::set_entity_about(&state.settings().vault(), &kind, &slug, &body).map_err(err)
+}
+
+#[tauri::command]
+fn set_objective_done(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+    index: usize,
+    done: bool,
+) -> CmdResult<()> {
+    vault::set_objective_done(&state.settings().vault(), &kind, &slug, index, done).map_err(err)
+}
+
+#[tauri::command]
+fn add_objective(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+    text: String,
+) -> CmdResult<()> {
+    vault::add_objective(&state.settings().vault(), &kind, &slug, &text).map_err(err)
+}
+
+#[tauri::command]
+fn remove_objective(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+    index: usize,
+) -> CmdResult<()> {
+    vault::remove_objective(&state.settings().vault(), &kind, &slug, index).map_err(err)
+}
+
 /// Nest one page under another. Files never move, so links survive.
 #[tauri::command]
 fn set_entity_parent(
@@ -647,6 +695,18 @@ fn apply_triage(
     let mut new_entities = Vec::new();
     let applied = apply_actions(v, &triage.actions, known, item)?;
 
+    // A description for a project this capture is inventing. Triage returns it
+    // alongside the entry, so a page gets described without a second call.
+    let mut new_descriptions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for e in &triage.entries {
+        if e.is_new && !e.slug.trim().is_empty() && !e.description.trim().is_empty() {
+            new_descriptions
+                .entry(vault::slugify(&e.slug))
+                .or_insert_with(|| e.description.trim().to_string());
+        }
+    }
+
     // Group project/area entries by slug so one upsert covers the whole item.
     let mut entity_bodies: std::collections::HashMap<String, (String, String, String, String)> =
         std::collections::HashMap::new();
@@ -818,7 +878,7 @@ fn apply_triage(
                 status: "active".into(),
                 parent: String::new(),
                 aliases: vec![],
-                description: String::new(),
+                description: new_descriptions.get(slug).cloned().unwrap_or_default(),
             });
         } else if let Some(k) = known.iter_mut().find(|k| k.slug == *slug) {
             if k.kind.is_empty() {
@@ -1301,6 +1361,11 @@ pub fn run() {
             delete_entry,
             resolve_open_loop,
             set_entity_parent,
+            project_summaries,
+            set_entity_about,
+            set_objective_done,
+            add_objective,
+            remove_objective,
             list_trash,
             restore_trash,
             purge_trash,

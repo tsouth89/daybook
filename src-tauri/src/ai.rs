@@ -25,6 +25,9 @@ pub struct RoutedEntry {
     pub name: String,
     #[serde(default)]
     pub is_new: bool,
+    /// One line saying what the project is. Only meaningful when `is_new`.
+    #[serde(default)]
+    pub description: String,
     pub title: String,
     pub body: String,
     #[serde(default)]
@@ -102,7 +105,7 @@ fn triage_schema() -> serde_json::Value {
                     "type": "object",
                     "additionalProperties": false,
                     "required": [
-                        "scope", "kind", "slug", "name", "is_new",
+                        "scope", "kind", "slug", "name", "is_new", "description",
                         "title", "body", "accomplished", "decisions", "open", "due"
                     ],
                     "properties": {
@@ -111,6 +114,7 @@ fn triage_schema() -> serde_json::Value {
                         "slug": { "type": "string" },
                         "name": { "type": "string" },
                         "is_new": { "type": "boolean" },
+                        "description": { "type": "string" },
                         "title": { "type": "string" },
                         "body": { "type": "string" },
                         "accomplished": str_array,
@@ -135,6 +139,7 @@ fn json_example() -> &'static str {
       "slug": "daybook",
       "name": "Daybook",
       "is_new": false,
+      "description": "",
       "title": "Inbox routing",
       "body": "Got the inbox layer wiring so captures split into discrete entries.",
       "accomplished": ["Wired inbox triage"],
@@ -148,6 +153,7 @@ fn json_example() -> &'static str {
       "slug": "daybook",
       "name": "Daybook",
       "is_new": false,
+      "description": "",
       "title": "Write tests for the routing",
       "body": "Still need tests around the inbox routing before this is done.",
       "accomplished": [],
@@ -161,6 +167,7 @@ fn json_example() -> &'static str {
       "slug": "",
       "name": "",
       "is_new": false,
+      "description": "",
       "title": "Book dentist",
       "body": "Need to schedule a cleaning next week.",
       "accomplished": [],
@@ -214,7 +221,7 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
          the work and a `note` for the mood — and that is better than one entry carrying both.\n\n\
          Match projects/areas against the known list below, including aliases. Speech is loose. \
          If work clearly belongs to something not on the list, create it with a kebab-case slug \
-         and set is_new to true. Prefer `area` over inventing a fake project for ongoing life domains.\n\n\
+         and set is_new to true. When you set is_new, also write `description`: one plain          sentence saying what that project is, inferred from what they said. It becomes the          page's standing description, so it should describe the project rather than this          particular capture. Leave `description` empty for anything that already exists. Prefer `area` over inventing a fake project for ongoing life domains.\n\n\
          For project/area entries: fill `accomplished` / `decisions` / `open` when present. \
          Decisions should keep the reason if one was given. For tasks, set `due` to YYYY-MM-DD \
          when a date is clear; otherwise null. `title` is a short label (a few words).\n\n\

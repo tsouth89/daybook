@@ -926,3 +926,68 @@ textarea {
   font-size: var(--t-sm);
 }
 .did-mark { color: var(--accent); font-weight: 700; margin-right: 2px; }
+
+/* ------------------------------------------------- home: projects at a glance */
+
+.home-strip {
+  display: flex; align-items: center; gap: var(--s2);
+  padding-bottom: var(--s3); margin-bottom: var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+.home-strip-main { display: flex; align-items: baseline; gap: var(--s3); flex: 1; min-width: 0; }
+.home-date { font-size: var(--t-lg); font-weight: 600; color: var(--fg-strong); letter-spacing: -0.2px; }
+.strip-flag { font-size: var(--t-sm); font-weight: 600; }
+.strip-flag.warn { color: var(--warn); }
+.strip-flag.bad { color: var(--bad); }
+
+.proj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--s4);
+  align-items: start;
+}
+.proj-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-1);
+  padding: var(--s4);
+  animation: fade-in var(--ease);
+}
+.proj-head { display: flex; align-items: baseline; gap: var(--s2); }
+.proj-name {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--fg-strong); font-size: var(--t-md); font-weight: 600;
+  letter-spacing: -0.15px; text-align: left;
+}
+.proj-name:hover { color: var(--accent); }
+
+.proj-about {
+  font-size: var(--t-sm); line-height: 1.55; color: var(--fg);
+  margin: var(--s2) 0 var(--s3); cursor: text;
+  border-radius: var(--radius-sm);
+}
+.proj-about.dim { font-style: italic; }
+.proj-about:hover { background: var(--bg-3); }
+.proj-about-edit {
+  margin: var(--s2) 0 var(--s3); min-height: 54px; resize: vertical;
+  font-size: var(--t-sm); line-height: 1.55;
+}
+
+.proj-block { margin-bottom: var(--s3); }
+.proj-block-head { display: flex; align-items: baseline; justify-content: space-between; }
+.proj-block .section-label { margin: 0 0 var(--s1); }
+
+.obj-list { list-style: none; padding: 0; margin: 0; }
+.obj-list li {
+  display: flex; align-items: baseline; gap: var(--s2);
+  font-size: var(--t-sm); line-height: 1.5; padding: 2px 0;
+}
+.obj-list input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; }
+
+.proj-foot {
+  display: flex; align-items: center; gap: var(--s2);
+  padding-top: var(--s2); border-top: 1px solid var(--line-soft);
+}
+
+.loose { margin-top: var(--s5); max-width: 720px; }

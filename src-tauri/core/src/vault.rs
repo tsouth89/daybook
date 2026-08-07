@@ -2651,3 +2651,153 @@ pub fn render_entity_page(v: &Path, kind: &str, slug: &str, date_fmt: &str) -> R
     std::fs::write(&path, out)?;
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Project summaries: everything the home screen shows, in one pass.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Objective {
+    pub text: String,
+    pub done: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectSummary {
+    pub slug: String,
+    pub name: String,
+    pub kind: String,
+    pub scope: String,
+    pub status: String,
+    pub parent: String,
+    /// `## What this is`, empty when never described.
+    pub about: String,
+    pub objectives: Vec<Objective>,
+    /// Unresolved loops across this project's entries.
+    pub now: Vec<String>,
+    pub open_tasks: usize,
+    pub overdue_tasks: usize,
+    pub last_date: String,
+}
+
+/// Parse the `## Objectives` checklist. Non-checkbox lines are kept as
+/// unchecked items so a plain bullet list still reads as objectives.
+pub fn parse_objectives(section: &str) -> Vec<Objective> {
+    section
+        .lines()
+        .filter_map(|l| {
+            let t = l.trim();
+            let (done, rest) = if let Some(r) = t.strip_prefix("- [x]").or_else(|| t.strip_prefix("- [X]")) {
+                (true, r)
+            } else if let Some(r) = t.strip_prefix("- [ ]") {
+                (false, r)
+            } else if let Some(r) = t.strip_prefix("- ") {
+                (false, r)
+            } else {
+                return None;
+            };
+            let text = rest.trim().to_string();
+            if text.is_empty() {
+                None
+            } else {
+                Some(Objective { text, done })
+            }
+        })
+        .collect()
+}
+
+fn render_objectives(items: &[Objective]) -> String {
+    if items.is_empty() {
+        return "- [ ] ".to_string();
+    }
+    items
+        .iter()
+        .map(|o| format!("- [{}] {}", if o.done { "x" } else { " " }, o.text))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn entity_page_text(v: &Path, kind: &str, slug: &str) -> String {
+    let kind = if kind == "area" { "area" } else { "project" };
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    std::fs::read_to_string(dir.join(format!("{}.md", slugify(slug)))).unwrap_or_default()
+}
+
+pub fn read_objectives(v: &Path, kind: &str, slug: &str) -> Vec<Objective> {
+    extract_section(&entity_page_text(v, kind, slug), SECTION_OBJECTIVES)
+        .map(|s| parse_objectives(&s))
+        .unwrap_or_default()
+}
+
+/// Tick or untick one objective by position. Positions come from the same
+/// parse the UI rendered, so they line up.
+pub fn set_objective_done(v: &Path, kind: &str, slug: &str, index: usize, done: bool) -> Result<()> {
+    let mut items = read_objectives(v, kind, slug);
+    let Some(o) = items.get_mut(index) else {
+        anyhow::bail!("No objective at position {index}");
+    };
+    o.done = done;
+    set_entity_objectives(v, kind, slug, &render_objectives(&items))
+}
+
+pub fn add_objective(v: &Path, kind: &str, slug: &str, text: &str) -> Result<()> {
+    let text = text.trim();
+    if text.is_empty() {
+        anyhow::bail!("An objective needs some text.");
+    }
+    let mut items = read_objectives(v, kind, slug);
+    items.push(Objective { text: text.to_string(), done: false });
+    set_entity_objectives(v, kind, slug, &render_objectives(&items))
+}
+
+pub fn remove_objective(v: &Path, kind: &str, slug: &str, index: usize) -> Result<()> {
+    let mut items = read_objectives(v, kind, slug);
+    if index >= items.len() {
+        anyhow::bail!("No objective at position {index}");
+    }
+    items.remove(index);
+    set_entity_objectives(v, kind, slug, &render_objectives(&items))
+}
+
+/// One pass over the index and the pages, so the home screen is a single call
+/// rather than a query per project.
+pub fn project_summaries(v: &Path, today: &str) -> Vec<ProjectSummary> {
+    let records = crate::entries::load(v);
+    let done = crate::entries::task_state(v);
+
+    list_projects(v, "YYYY-MM-DD")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| {
+            let mine: Vec<_> = records.iter().filter(|r| r.slug == p.slug).collect();
+            let page = entity_page_text(v, &p.kind, &p.slug);
+            let tasks: Vec<_> = mine
+                .iter()
+                .filter(|r| r.kind == "task" && !done.get(&r.id).copied().unwrap_or(false))
+                .collect();
+            ProjectSummary {
+                about: extract_section(&page, SECTION_ABOUT).unwrap_or_default(),
+                objectives: extract_section(&page, SECTION_OBJECTIVES)
+                    .map(|s| parse_objectives(&s))
+                    .unwrap_or_default(),
+                now: mine.iter().flat_map(|r| r.open.iter().cloned()).collect(),
+                open_tasks: tasks.len(),
+                overdue_tasks: tasks
+                    .iter()
+                    .filter(|r| r.due.as_deref().map(|d| d < today).unwrap_or(false))
+                    .count(),
+                last_date: mine
+                    .iter()
+                    .map(|r| r.date.clone())
+                    .max()
+                    .unwrap_or_else(|| p.last_date.clone()),
+                slug: p.slug,
+                name: p.name,
+                kind: p.kind,
+                scope: p.scope,
+                status: p.status,
+                parent: p.parent,
+            }
+        })
+        .collect()
+}
