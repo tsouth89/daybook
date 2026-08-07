@@ -33,6 +33,8 @@ export type ProjectEntry = {
   name: string;
   kind: string;
   scope: string;
+  /** active | paused | done — frontmatter, so hand-editable. */
+  status: string;
   last_date: string;
   day_count: number;
 };
@@ -42,6 +44,7 @@ export type ProjectMeta = {
   name: string;
   kind: string;
   scope: string;
+  status: string;
   aliases: string[];
   description: string;
 };

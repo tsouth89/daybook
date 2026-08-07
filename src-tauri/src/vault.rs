@@ -435,10 +435,17 @@ pub struct ProjectMeta {
     /// "personal" or "work". Orthogonal to kind: a personal project is both.
     #[serde(default = "default_scope")]
     pub scope: String,
+    /// `active` | `paused` | `done`. Only projects really finish; areas stay active.
+    #[serde(default = "default_status")]
+    pub status: String,
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(default)]
     pub description: String,
+}
+
+fn default_status() -> String {
+    "active".into()
 }
 
 fn default_kind() -> String {
@@ -806,6 +813,7 @@ pub fn create_entity(
         name: name.to_string(),
         kind: kind.to_string(),
         scope: scope.to_string(),
+        status: "active".into(),
         aliases: vec![],
         description: String::new(),
     };
@@ -850,11 +858,13 @@ pub struct ProjectEntry {
     pub name: String,
     pub kind: String,
     pub scope: String,
+    /// `active` | `paused` | `done`. Frontmatter, so it is hand-editable.
+    pub status: String,
     pub last_date: String,
     pub day_count: usize,
 }
 
-fn list_entity_dir(dir: &Path, kind: &str) -> Vec<ProjectEntry> {
+fn list_entity_dir(dir: &Path, kind: &str, date_fmt: &str) -> Vec<ProjectEntry> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else {
         return out;
@@ -877,27 +887,37 @@ fn list_entity_dir(dir: &Path, kind: &str) -> Vec<ProjectEntry> {
             .unwrap_or("work")
             .trim()
             .to_string();
-        let dates: Vec<&str> = text
+        let status = text
+            .lines()
+            .find_map(|l| l.strip_prefix("status: "))
+            .unwrap_or("active")
+            .trim()
+            .to_string();
+        // Date headings are written in the user's display format, so an ISO-only
+        // parse finds nothing and every project looks untouched.
+        let mut dates: Vec<String> = text
             .lines()
             .filter_map(|l| l.strip_prefix("## "))
-            .map(str::trim)
-            .filter(|d| valid_date(d).is_ok())
+            .filter_map(|d| crate::datetime::parse_date_to_iso(d.trim(), date_fmt))
             .collect();
+        dates.sort();
+        dates.dedup();
         out.push(ProjectEntry {
             slug: slug.to_string(),
             name: display,
             kind: kind.to_string(),
             scope,
-            last_date: dates.first().unwrap_or(&"").to_string(),
+            status: if status.is_empty() { "active".into() } else { status },
+            last_date: dates.last().cloned().unwrap_or_default(),
             day_count: dates.len(),
         });
     }
     out
 }
 
-pub fn list_projects(v: &Path) -> Result<Vec<ProjectEntry>> {
-    let mut out = list_entity_dir(&projects_dir(v), "project");
-    out.extend(list_entity_dir(&areas_dir(v), "area"));
+pub fn list_projects(v: &Path, date_fmt: &str) -> Result<Vec<ProjectEntry>> {
+    let mut out = list_entity_dir(&projects_dir(v), "project", date_fmt);
+    out.extend(list_entity_dir(&areas_dir(v), "area", date_fmt));
     out.sort_by(|a, b| b.last_date.cmp(&a.last_date));
     Ok(out)
 }

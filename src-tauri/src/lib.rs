@@ -390,7 +390,8 @@ async fn refresh_personal_overview(state: tauri::State<'_, AppState>) -> CmdResu
 
 #[tauri::command]
 fn list_projects(state: tauri::State<AppState>) -> CmdResult<Vec<vault::ProjectEntry>> {
-    vault::list_projects(&state.settings().vault()).map_err(err)
+    let s = state.settings();
+    vault::list_projects(&s.vault(), &s.date_format).map_err(err)
 }
 
 #[tauri::command]
@@ -671,6 +672,7 @@ fn apply_triage(
                 name: name.clone(),
                 kind: kind.clone(),
                 scope: scope.clone(),
+                status: "active".into(),
                 aliases: vec![],
                 description: String::new(),
             });

@@ -168,8 +168,14 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
     for (const t of tasks) {
       if (t.slug) taskBySlug.set(t.slug, (taskBySlug.get(t.slug) ?? 0) + 1);
     }
+    const rank = (s: string) => (s === "active" ? 0 : s === "paused" ? 1 : 2);
     return [...projects]
-      .sort((a, b) => (b.last_date || "").localeCompare(a.last_date || ""))
+      .filter((p) => p.status !== "done")
+      .sort(
+        (a, b) =>
+          rank(a.status) - rank(b.status) ||
+          (b.last_date || "").localeCompare(a.last_date || "")
+      )
       .slice(0, 8)
       .map((p) => ({
         ...p,
@@ -348,6 +354,7 @@ export default function HomeView({ date, onChanged, onError, onNotice }: Props) 
                     <span className="dim tiny">
                       {p.last_date ? fmt.date(p.last_date) : "—"}
                     </span>
+                    {p.status === "paused" && <span className="pill">paused</span>}
                     {p.openCount > 0 && <span className="pill warn">{p.openCount} open</span>}
                     {p.taskCount > 0 && <span className="pill">{p.taskCount} tasks</span>}
                   </li>
