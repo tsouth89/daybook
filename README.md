@@ -98,6 +98,10 @@ A failed triage leaves the item sitting in the inbox.
 - **Search**: filter by scope, kind, project, or open loops and you are querying the
   item layer; type a bare word and you also get a substring pass over the raw markdown,
   which is what catches hand-written notes that were never routed.
+- **Ask**: questions answered from your own entries — "what did I decide about auth",
+  "what's outstanding". Retrieval runs over the item layer, so a question pulls the few
+  entries that mention it rather than whole days. Every answer lists what it drew from,
+  and the model is told to say it doesn't know rather than guess.
 - **Tune**: glossary first (dictation mangles proper nouns), then aliases, then the
   profile. Those three beat any model upgrade.
 
@@ -113,6 +117,7 @@ In-app shortcuts, ignored while you are typing in an editor or input:
 | `Ctrl+Shift+D` | Days |
 | `Ctrl+Shift+J` | Projects |
 | `Ctrl+Shift+F` | Search |
+| `Ctrl+Shift+A` | Ask |
 | `Ctrl+Shift+E` | New entry |
 | `Ctrl+Shift+P` | Process the current view's pending items |
 | `Ctrl+S` | Save the open editor |

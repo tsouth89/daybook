@@ -129,6 +129,40 @@ fn set_task_done(state: tauri::State<AppState>, entry_id: String, done: bool) ->
     entries::set_task_done(&state.settings().vault(), &entry_id, done).map_err(err)
 }
 
+#[derive(Serialize)]
+struct AskAnswer {
+    answer: String,
+    /// The entries the answer was drawn from, so it can be checked.
+    used: Vec<entries::EntryRecord>,
+}
+
+/// Ask a question of the vault. Retrieval runs over the item layer, which is
+/// why this waited until entries existed — the same question over date-ordered
+/// prose would pull in whole days of unrelated content.
+#[tauri::command]
+async fn ask_vault(state: tauri::State<'_, AppState>, question: String) -> CmdResult<AskAnswer> {
+    let s = state.settings();
+    if question.trim().is_empty() {
+        return Err("Ask something first.".into());
+    }
+    let used = entries::retrieve(&s.vault(), &question, 24);
+    if used.is_empty() {
+        return Err("Nothing in your daybook matched that question.".into());
+    }
+    let context = entries::as_context(&used);
+    let answer = ai::ask(ai::AskRequest {
+        provider: &s.provider,
+        api_key: &s.resolved_api_key(),
+        model: &s.model,
+        effort: &s.effort,
+        question: &question,
+        context: &context,
+    })
+    .await
+    .map_err(err)?;
+    Ok(AskAnswer { answer, used })
+}
+
 /// Recover item records from markdown written before the index existed. Costs
 /// nothing — it parses the vault rather than re-triaging through the model.
 #[tauri::command]
@@ -1040,6 +1074,7 @@ pub fn run() {
             list_backlinks,
             query_entries,
             rebuild_entry_index,
+            ask_vault,
             set_task_done,
             save_attachment,
             save_file_attachment,

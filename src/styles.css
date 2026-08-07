@@ -535,3 +535,17 @@ kbd {
   display: grid;
   gap: 20px;
 }
+
+.askview { max-width: 820px; }
+.ask-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+.ask-bar input { flex: 1; font-size: 14px; padding: 9px 12px; }
+.ask-examples { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ask-answer {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+}
+.ask-answer .md { margin-top: 6px; }

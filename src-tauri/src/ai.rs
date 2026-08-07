@@ -766,3 +766,66 @@ async fn overview_openai_compatible(
         .map(str::to_string)
         .ok_or_else(|| anyhow!("No content in the overview response"))
 }
+
+// ---------------------------------------------------------------------------
+// Ask — answer a question from entries retrieved out of the vault.
+// ---------------------------------------------------------------------------
+
+pub struct AskRequest<'a> {
+    pub provider: &'a str,
+    pub api_key: &'a str,
+    pub model: &'a str,
+    pub effort: &'a str,
+    pub question: &'a str,
+    /// Pre-retrieved entries, already formatted.
+    pub context: &'a str,
+}
+
+/// Answer strictly from what the daybook contains. The point of this is recall,
+/// not a chat partner — an answer that quietly invents a decision the author
+/// never made would be worse than no answer.
+pub async fn ask(req: AskRequest<'_>) -> Result<String> {
+    if req.api_key.is_empty() {
+        bail!("No API key set, so questions can't be answered.");
+    }
+    if req.context.trim().is_empty() {
+        bail!("Nothing in the daybook matched that question.");
+    }
+
+    let system = "You answer questions about the author's own daybook, using only the entries \
+         provided.\n\n\
+         Rules:\n\
+         1. Use only the entries given. If they do not answer the question, say so plainly and \
+         stop. Never fill a gap with a plausible guess — a decision the author did not make is \
+         worse than no answer.\n\
+         2. Cite what you used inline as (date) or (date, Project), matching the entry headers.\n\
+         3. Be short. A few sentences or a tight list. This is recall, not an essay.\n\
+         4. Speak plainly and keep the author's own vocabulary for their projects and jargon.\n\
+         5. The entries are the author's own notes, so answer in the second person (\"you decided\").\n";
+
+    let user = format!(
+        "Question: {}\n\n<entries>\n{}\n</entries>",
+        req.question.trim(),
+        req.context.trim()
+    );
+
+    let text = match req.provider {
+        "deepseek" => {
+            overview_openai_compatible(req.api_key, req.model, DEEPSEEK_URL, false, system, &user)
+                .await?
+        }
+        "anthropic" => overview_anthropic(req.api_key, req.model, req.effort, system, &user).await?,
+        _ => {
+            overview_openai_compatible(req.api_key, req.model, OPENAI_URL, true, system, &user)
+                .await?
+        }
+    };
+
+    let cleaned = text.trim().trim_start_matches("```markdown").trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    if cleaned.is_empty() {
+        bail!("The model returned an empty answer.");
+    }
+    Ok(cleaned.to_string())
+}

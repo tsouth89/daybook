@@ -450,6 +450,29 @@ mod tests {
     }
 
     #[test]
+    fn retrieval_ranks_relevant_entries_and_drops_the_rest() {
+        let v = tmp();
+        crate::vault::ensure_vault(&v).unwrap();
+        let mut auth = rec("cap-1-e0", "cap-1", "project", "daybook", "2026-08-01");
+        auth.decisions = vec!["Used session cookies for auth, simpler than JWT".into()];
+        let mut other = rec("cap-2-e0", "cap-2", "project", "bmx-site", "2026-08-02");
+        other.body = "Painted the frame".into();
+        replace_item(&v, "cap-1", &[auth]).unwrap();
+        replace_item(&v, "cap-2", &[other]).unwrap();
+
+        let hits = retrieve(&v, "what did I decide about auth?", 5);
+        assert_eq!(hits.len(), 1, "unrelated entries are not padding");
+        assert_eq!(hits[0].id, "cap-1-e0");
+
+        // Stopwords alone must not drag everything in.
+        assert!(retrieve(&v, "what about the and for", 5).is_empty());
+
+        let ctx = as_context(&hits);
+        assert!(ctx.contains("decided: Used session cookies"));
+        assert!(ctx.contains("[2026-08-01]"));
+    }
+
+    #[test]
     fn text_search_reaches_into_the_structured_lists() {
         let v = tmp();
         crate::vault::ensure_vault(&v).unwrap();
@@ -528,4 +551,100 @@ mod tests {
         assert_eq!(loops.len(), 1);
         assert_eq!(loops[0].record.open, vec!["Decide on the index format"]);
     }
+}
+
+const STOPWORDS: &[&str] = &[
+    "the", "and", "for", "was", "were", "what", "when", "where", "did", "does", "with", "that",
+    "this", "have", "has", "had", "about", "from", "into", "any", "all", "you", "your", "are",
+    "not", "but", "how", "why", "who", "which", "there", "their", "then", "than", "been", "being",
+    "some", "just", "get", "got", "can", "will", "would", "should", "could", "still", "over",
+];
+
+fn terms(q: &str) -> Vec<String> {
+    q.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 2 && !STOPWORDS.contains(w))
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// Pick the entries most likely to answer a question. Deliberately dumb: term
+/// overlap plus a nudge for recency. It works because the entries being scored
+/// are already split and routed, not whole files of mixed content.
+pub fn retrieve(v: &Path, question: &str, limit: usize) -> Vec<EntryRecord> {
+    let terms = terms(question);
+    let all = load(v);
+    if all.is_empty() {
+        return vec![];
+    }
+    let newest = all.iter().map(|r| r.date.as_str()).max().unwrap_or("").to_string();
+
+    let mut scored: Vec<(usize, &EntryRecord)> = all
+        .iter()
+        .map(|r| {
+            let hay = format!(
+                "{} {} {} {} {} {} {}",
+                r.title,
+                r.body,
+                r.name,
+                r.slug,
+                r.accomplished.join(" "),
+                r.decisions.join(" "),
+                r.open.join(" ")
+            )
+            .to_lowercase();
+            let mut score: usize = terms.iter().filter(|t| hay.contains(t.as_str())).count() * 10;
+            if score > 0 {
+                // Break ties toward what is still open and what happened lately.
+                if !r.open.is_empty() {
+                    score += 3;
+                }
+                if r.date == newest {
+                    score += 2;
+                }
+            }
+            (score, r)
+        })
+        .filter(|(s, _)| *s > 0)
+        .collect();
+
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.date.cmp(&a.1.date)));
+    scored.into_iter().take(limit).map(|(_, r)| r.clone()).collect()
+}
+
+/// Compact, model-facing rendering of the entries retrieved for a question.
+pub fn as_context(records: &[EntryRecord]) -> String {
+    let mut out = String::new();
+    for r in records {
+        out.push_str(&format!("[{}] {}", r.date, r.kind));
+        if !r.name.is_empty() || !r.slug.is_empty() {
+            out.push_str(&format!(
+                " · {}",
+                if r.name.is_empty() { &r.slug } else { &r.name }
+            ));
+        }
+        if !r.title.is_empty() {
+            out.push_str(&format!(" · {}", r.title));
+        }
+        out.push('\n');
+        if !r.accomplished.is_empty() {
+            out.push_str(&format!("  accomplished: {}\n", r.accomplished.join("; ")));
+        }
+        if !r.decisions.is_empty() {
+            out.push_str(&format!("  decided: {}\n", r.decisions.join("; ")));
+        }
+        if !r.open.is_empty() {
+            out.push_str(&format!("  open: {}\n", r.open.join("; ")));
+        }
+        if let Some(d) = &r.due {
+            out.push_str(&format!("  due: {d}\n"));
+        }
+        let body = r.body.trim();
+        if !body.is_empty() {
+            let short: String = body.chars().take(600).collect();
+            out.push_str(&format!("  {}\n", short.replace('\n', " ")));
+        }
+        out.push('\n');
+    }
+    out
 }

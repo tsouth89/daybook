@@ -167,6 +167,9 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
             <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> — Search
           </li>
           <li>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> — Ask
+          </li>
+          <li>
             <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> — New entry
           </li>
           <li>

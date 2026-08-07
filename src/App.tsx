@@ -16,6 +16,7 @@ import SettingsView from "./views/SettingsView";
 import TasksView from "./views/TasksView";
 import TodayView from "./views/TodayView";
 import HomeView from "./views/HomeView";
+import AskView from "./views/AskView";
 
 type Tab =
   | "home"
@@ -27,6 +28,7 @@ type Tab =
   | "tasks"
   | "ideas"
   | "history"
+  | "ask"
   | "search"
   | "settings";
 
@@ -175,6 +177,7 @@ export default function App() {
         d: "days",
         j: "projects",
         f: "search",
+        a: "ask",
       };
       const next = map[k];
       if (next) {
@@ -242,6 +245,7 @@ export default function App() {
                   ["tasks", "Tasks"],
                   ["ideas", "Ideas"],
                   ["history", "History"],
+                  ["ask", "Ask"],
                   ["search", "Search"],
                   ["settings", "Settings"],
                 ] as [Tab, string][]
@@ -394,6 +398,7 @@ export default function App() {
                   }}
                 />
               )}
+              {tab === "ask" && <AskView vaultPath={vaultPath} onError={setBanner} />}
               {tab === "search" && <SearchView onError={setBanner} onNotice={flash} />}
               {tab === "settings" && settings && (
                 <SettingsView

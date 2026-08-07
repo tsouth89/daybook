@@ -120,6 +120,12 @@ export type EntryQuery = {
   limit?: number;
 };
 
+export type AskAnswer = {
+  answer: string;
+  /** The entries the answer was drawn from, so it can be checked. */
+  used: Entry[];
+};
+
 export type RebuildReport = {
   recovered: number;
   kept: number;
@@ -158,6 +164,7 @@ export const api = {
   queryEntries: (query: EntryQuery = {}) =>
     invoke<Entry[]>("query_entries", { query }),
   rebuildEntryIndex: () => invoke<RebuildReport>("rebuild_entry_index"),
+  askVault: (question: string) => invoke<AskAnswer>("ask_vault", { question }),
   setTaskDone: (entryId: string, done: boolean) =>
     invoke<void>("set_task_done", { entryId, done }),
   saveAttachment: (dataBase64: string, ext: string) =>
