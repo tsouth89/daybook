@@ -102,6 +102,8 @@ A failed triage leaves the item sitting in the inbox.
   "what's outstanding". Retrieval runs over the item layer, so a question pulls the few
   entries that mention it rather than whole days. Every answer lists what it drew from,
   and the model is told to say it doesn't know rather than guess.
+- **Linking**: typing `[[` in any editor offers projects, areas, days, and the standing
+  pages, and closes the brackets for you.
 - **Tune**: glossary first (dictation mangles proper nouns), then aliases, then the
   profile. Those three beat any model upgrade.
 
@@ -111,6 +113,7 @@ In-app shortcuts, ignored while you are typing in an editor or input:
 
 | Shortcut | Action |
 |---|---|
+| `Ctrl+K` | Quick switcher / command palette (works inside editors too) |
 | `Ctrl+Shift+H` | Home |
 | `Ctrl+Shift+T` | Today |
 | `Ctrl+Shift+I` | Inbox |
@@ -137,6 +140,28 @@ or personal page: it is only rewritten when you ask for **Refresh summary**.
 Default model is GPT-5.6 Luna (~$0.20/$1.20 per Mtok). A normal month of triage is well under
 a dollar. Terra and Anthropic Claude are available if you need more power; DeepSeek remains an
 option if you ever want the absolute cheapest pass.
+
+## Installing
+
+```sh
+pnpm tauri build
+```
+
+Produces three things under `src-tauri/target/release/`:
+
+| Artifact | Path | Use |
+|---|---|---|
+| Installer (recommended) | `bundle/nsis/Daybook_<ver>_x64-setup.exe` | Normal install, Start-menu entry, uninstaller |
+| MSI | `bundle/msi/Daybook_<ver>_x64_en-US.msi` | Group-policy / scripted installs |
+| Bare executable | `daybook.exe` | Run from anywhere without installing |
+
+The bare `daybook.exe` runs on its own — Windows 11 already ships the WebView2
+runtime it needs. It is not *fully* portable, though: settings and API keys live
+in `%APPDATA%\com.tsouth.daybook`, not next to the executable. Your notes are
+portable regardless, since the vault is a folder of Markdown you choose.
+
+The build is unsigned, so Windows SmartScreen will warn on first run until you
+either sign it or click through.
 
 ## Development
 

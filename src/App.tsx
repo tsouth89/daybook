@@ -297,43 +297,51 @@ export default function App() {
               </button>
               {(
                 [
-                  ["home", "Home"],
-                  ["today", todayPending ? `Today (${todayPending})` : "Today"],
-                  ["inbox", inboxCount ? `Inbox (${inboxCount})` : "Inbox"],
-                  ["days", "Days"],
-                  ["personal", "Personal"],
-                  ["projects", "Projects"],
-                  ["tasks", "Tasks"],
-                  ["ideas", "Ideas"],
-                  ["history", "History"],
-                  ["ask", "Ask"],
-                  ["search", "Search"],
-                  ["settings", "Settings"],
-                ] as [Tab, string][]
-              ).map(([k, label]) => (
-                <button
-                  key={k}
-                  className={`navitem ${tab === k ? "active" : ""}`}
-                  onClick={() => goTab(k)}
-                  onContextMenu={(e) =>
-                    menu.open(e, [
-                      {
-                        label: `Open ${label.replace(/\s*\(.*\)/, "")}`,
-                        onClick: () => goTab(k),
-                      },
-                      { kind: "sep" },
-                      { label: "New entry", onClick: () => void api.showCapture() },
-                      {
-                        label: "Open vault folder",
-                        onClick: () =>
-                          void api.revealVault().catch((err) => setBanner(errText(err))),
-                      },
-                    ])
-                  }
-                >
-                  {label}
-                </button>
-              ))}
+                  [null, "Daily"],
+                  ["home", "Home", 0],
+                  ["today", "Today", todayPending],
+                  ["inbox", "Inbox", inboxCount],
+                  [null, "Library"],
+                  ["days", "Days", 0],
+                  ["projects", "Projects", 0],
+                  ["personal", "Personal", 0],
+                  ["tasks", "Tasks", 0],
+                  ["ideas", "Ideas", 0],
+                  [null, "Find"],
+                  ["ask", "Ask", 0],
+                  ["search", "Search", 0],
+                  ["history", "History", 0],
+                  [null, ""],
+                  ["settings", "Settings", 0],
+                ] as [Tab | null, string, number?][]
+              ).map(([k, label, count], i) =>
+                k === null ? (
+                  <div key={`g${i}`} className="nav-group">
+                    {label}
+                  </div>
+                ) : (
+                  <button
+                    key={k}
+                    className={`navitem ${tab === k ? "active" : ""}`}
+                    onClick={() => goTab(k)}
+                    onContextMenu={(e) =>
+                      menu.open(e, [
+                        { label: `Open ${label}`, onClick: () => goTab(k) },
+                        { kind: "sep" },
+                        { label: "New entry", onClick: () => void api.showCapture() },
+                        {
+                          label: "Open vault folder",
+                          onClick: () =>
+                            void api.revealVault().catch((err) => setBanner(errText(err))),
+                        },
+                      ])
+                    }
+                  >
+                    {label}
+                    {!!count && <span className="badge">{count}</span>}
+                  </button>
+                )
+              )}
               <div className="spacer" />
               {settings && (
                 <div

@@ -2,17 +2,79 @@
   --bg: #14161a;
   --bg-2: #1b1e24;
   --bg-3: #22262e;
+  --bg-hover: #272c35;
   --line: #2e333d;
+  --line-soft: #23272f;
   --fg: #dfe3ea;
+  --fg-strong: #f2f5f9;
   --dim: #8b93a1;
+  --dimmer: #6b727e;
   --accent: #6f9cf0;
+  --accent-soft: #24314b;
   --good: #63c98a;
   --warn: #e0b45c;
   --bad: #ef7676;
+
   --radius: 8px;
-  font-family: "Segoe UI", system-ui, sans-serif;
+  --radius-sm: 5px;
+
+  /* Type ramp. Everything used to be 13px; hierarchy has to come from
+     somewhere and size is cheaper than adding more borders. */
+  --t-xs: 11px;
+  --t-sm: 12.5px;
+  --t-base: 13.5px;
+  --t-md: 15px;
+  --t-lg: 19px;
+  --t-xl: 24px;
+
+  /* Spacing scale, so padding stops being a per-component guess. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 18px 50px rgba(0, 0, 0, 0.5);
+
+  --ease: 130ms cubic-bezier(0.32, 0.72, 0, 1);
+
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Respect the OS switch rather than inventing a toggle nobody asked for. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fbfbfc;
+    --bg-2: #ffffff;
+    --bg-3: #f1f2f5;
+    --bg-hover: #e8eaee;
+    --line: #dcdfe5;
+    --line-soft: #eaecf0;
+    --fg: #23262b;
+    --fg-strong: #101216;
+    --dim: #6a707c;
+    --dimmer: #8b919c;
+    --accent: #2f6bd8;
+    --accent-soft: #e4ecfb;
+    --good: #1f8a4c;
+    --warn: #9a6c10;
+    --bad: #c0392b;
+    --shadow-1: 0 1px 2px rgba(16, 18, 22, 0.06);
+    --shadow-2: 0 8px 24px rgba(16, 18, 22, 0.10);
+    --shadow-3: 0 18px 50px rgba(16, 18, 22, 0.16);
+    color-scheme: light;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --ease: 0ms linear; }
+  * { animation: none !important; }
 }
 
 * { box-sizing: border-box; }
@@ -26,13 +88,29 @@ body {
 }
 body.is-capture { background: transparent; }
 
+/* Keyboard users get a visible ring; mouse users never see it. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
 .mono { font-family: "Cascadia Mono", Consolas, monospace; }
 .dim { color: var(--dim); }
-.tiny { font-size: 11.5px; }
+.tiny { font-size: var(--t-xs); }
 .wrap { overflow-wrap: anywhere; }
 .good { color: var(--good); }
 .bad { color: var(--bad); }
 .grow, .spacer { flex: 1; }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.985) translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
 
 /* ------------------------------------------------------------- controls */
 
@@ -607,3 +685,124 @@ kbd {
   padding: 8px 16px; border-top: 1px solid var(--line);
   display: flex; align-items: center; gap: 4px;
 }
+
+/* =========================================================== design pass */
+/* Motion, hierarchy, and density corrections layered over the base rules
+   above. Kept together so the visual language is legible in one place. */
+
+.btn,
+.navitem,
+.tab,
+.listitem,
+.chip,
+.linkbtn,
+.palette-row,
+.loop-close,
+input,
+select,
+textarea {
+  transition:
+    background-color var(--ease),
+    border-color var(--ease),
+    color var(--ease),
+    opacity var(--ease);
+}
+
+.btn { border-radius: var(--radius-sm); font-size: var(--t-sm); }
+.btn:hover:not(:disabled) { background: var(--bg-hover); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn:active:not(:disabled) { transform: translateY(0.5px); }
+
+/* Sidebar: 12 flat items needed grouping and a little breathing room. */
+.sidebar { padding: var(--s3) var(--s2); gap: 1px; }
+.brand {
+  font-size: var(--t-md);
+  letter-spacing: -0.2px;
+  color: var(--fg-strong);
+  padding: var(--s1) var(--s3) var(--s3);
+}
+.navitem {
+  border-radius: var(--radius-sm);
+  padding: 6px var(--s3);
+  font-size: var(--t-base);
+}
+.navitem.active { box-shadow: inset 2px 0 0 var(--accent); }
+.nav-group {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--dimmer);
+  padding: var(--s4) var(--s3) var(--s1);
+}
+.navitem .badge {
+  float: right;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.main > .banner { animation: fade-in var(--ease); }
+
+/* Home: give the page a real title size and let the cards lift. */
+.home-title { font-size: var(--t-xl); letter-spacing: -0.4px; color: var(--fg-strong); }
+.home-head { padding-bottom: var(--s4); }
+.home-card {
+  box-shadow: var(--shadow-1);
+  padding: var(--s4);
+  animation: fade-in var(--ease);
+}
+.home-card .section-label { color: var(--dim); }
+
+.section-label { font-size: var(--t-xs); letter-spacing: 0.7px; }
+
+.task-row, .proj-list li, .recent-list li { border-color: var(--line-soft); }
+.task-row:hover, .proj-list li:hover, .recent-list li:hover { background: var(--bg-3); }
+.task-row, .proj-list li, .recent-list li {
+  padding-left: var(--s2);
+  padding-right: var(--s2);
+  margin: 0 calc(var(--s2) * -1);
+  border-radius: var(--radius-sm);
+}
+.task-row input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+
+.listitem { border-color: var(--line-soft); }
+.modal, .palette { animation: pop-in var(--ease); }
+.modal-backdrop { animation: fade-in var(--ease); }
+
+.empty h2 { font-size: var(--t-lg); color: var(--fg-strong); letter-spacing: -0.2px; }
+
+/* The markdown body is the thing you read most; give it real measure. */
+.md { font-size: var(--t-base); line-height: 1.65; }
+.md h1 { font-size: var(--t-xl); letter-spacing: -0.4px; }
+.md h2 { font-size: var(--t-lg); letter-spacing: -0.2px; }
+.md h3 { font-size: var(--t-md); }
+
+/* Narrow windows: the fixed sidebar and 290px lists stop fitting. */
+@media (max-width: 900px) {
+  .sidebar { width: 148px; }
+  .list { width: 220px; }
+  .home-grid { grid-template-columns: 1fr; }
+}
+
+/* Hardcoded darks that predate the light palette. */
+:root { --on-accent: #0d1017; --capture-bg: rgba(24, 27, 33, 0.97); --ok-bg: #1a2a22; --ok-line: #2d4a38; }
+@media (prefers-color-scheme: light) {
+  :root {
+    --on-accent: #ffffff;
+    --capture-bg: rgba(255, 255, 255, 0.98);
+    --ok-bg: #e9f6ee;
+    --ok-line: #bfe0cd;
+  }
+}
+.btn.primary { color: var(--on-accent); }
+.capture { background: var(--capture-bg); border-color: var(--line); }
+.banner.ok { background: var(--ok-bg); border-bottom-color: var(--ok-line); }
+.btn.danger { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+.md code, .md pre { background: var(--bg-3); }

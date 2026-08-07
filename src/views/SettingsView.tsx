@@ -149,6 +149,10 @@ export default function SettingsView({ settings, onSaved, onError }: Props) {
         </p>
         <ul className="dim tiny shortcut-list">
           <li>
+            <kbd>Ctrl</kbd>+<kbd>K</kbd> — Quick switcher / command palette. Works everywhere,
+            including inside an editor.
+          </li>
+          <li>
             <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> — Home
           </li>
           <li>
