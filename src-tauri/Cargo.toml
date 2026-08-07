@@ -24,3 +24,4 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 base64 = "0.22"
 walkdir = "2"
+sys-locale = "0.3.2"

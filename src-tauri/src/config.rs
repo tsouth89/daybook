@@ -57,10 +57,10 @@ fn default_context_days() -> usize {
     3
 }
 fn default_date_format() -> String {
-    crate::datetime::DEFAULT_DATE_FORMAT.into()
+    crate::datetime::locale_date_format()
 }
 fn default_time_format() -> String {
-    crate::datetime::DEFAULT_TIME_FORMAT.into()
+    crate::datetime::locale_time_format()
 }
 
 impl Default for Settings {

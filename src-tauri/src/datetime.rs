@@ -6,6 +6,35 @@ use chrono::{NaiveDate, NaiveTime};
 pub const DEFAULT_DATE_FORMAT: &str = "DD/MM/YYYY";
 pub const DEFAULT_TIME_FORMAT: &str = "24h";
 
+/// What a fresh install should use. Guessing one region's convention for
+/// everybody guarantees it reads wrong for most of them, so ask the OS.
+pub fn locale_date_format() -> String {
+    let locale = sys_locale::get_locale().unwrap_or_default().to_lowercase();
+    // Locales that write the big end first.
+    if ["sv", "lt", "hu", "ja", "zh", "ko"]
+        .iter()
+        .any(|p| locale.starts_with(p))
+    {
+        return "YYYY-MM-DD".into();
+    }
+    if locale.starts_with("en-us") || locale.starts_with("en_us") {
+        return "MM/DD/YYYY".into();
+    }
+    DEFAULT_DATE_FORMAT.into()
+}
+
+pub fn locale_time_format() -> String {
+    let locale = sys_locale::get_locale().unwrap_or_default().to_lowercase();
+    // 12-hour clock is mostly an anglophone habit outside the UK.
+    if ["en-us", "en_us", "en-ca", "en_ca", "en-au", "en_au", "en-nz", "en_nz", "en-ph", "en_ph"]
+        .iter()
+        .any(|p| locale.starts_with(p))
+    {
+        return "12h".into();
+    }
+    DEFAULT_TIME_FORMAT.into()
+}
+
 pub fn normalize_date_format(s: &str) -> &str {
     match s.trim() {
         "MM/DD/YYYY" => "MM/DD/YYYY",
