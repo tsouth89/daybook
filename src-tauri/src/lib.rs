@@ -3,6 +3,7 @@ mod config;
 mod backfill;
 mod datetime;
 mod entries;
+mod trash;
 mod vault;
 
 use base64::Engine;
@@ -96,7 +97,41 @@ fn delete_inbox_item(state: tauri::State<AppState>, id: String) -> CmdResult<()>
     // Discarding is also the escape hatch for a bad triage, so drop any records
     // the capture left behind rather than leaving them orphaned in the index.
     entries::remove_item(&v, &id).map_err(err)?;
+    if let Ok(contents) = std::fs::read_to_string(vault::inbox_dir(&v).join(format!("{id}.md"))) {
+        let label: String = contents
+            .split("---
+
+")
+            .nth(1)
+            .unwrap_or(&contents)
+            .trim()
+            .chars()
+            .take(80)
+            .collect();
+        trash::put(&v, &label, trash::Payload::Inbox { id: id.clone(), contents }).map_err(err)?;
+    }
     vault::delete_inbox_item(&v, &id).map_err(err)
+}
+
+#[tauri::command]
+fn list_trash(state: tauri::State<AppState>) -> CmdResult<Vec<trash::TrashItem>> {
+    Ok(trash::list(&state.settings().vault()))
+}
+
+#[tauri::command]
+fn restore_trash(state: tauri::State<AppState>, id: String) -> CmdResult<String> {
+    let s = state.settings();
+    trash::restore(&s.vault(), &id, &s.date_format).map_err(err)
+}
+
+#[tauri::command]
+fn purge_trash(state: tauri::State<AppState>, id: String) -> CmdResult<()> {
+    trash::purge(&state.settings().vault(), &id).map_err(err)
+}
+
+#[tauri::command]
+fn empty_trash(state: tauri::State<AppState>) -> CmdResult<usize> {
+    trash::empty(&state.settings().vault()).map_err(err)
 }
 
 #[tauri::command]
@@ -1201,6 +1236,10 @@ pub fn run() {
             delete_entry,
             resolve_open_loop,
             set_entity_parent,
+            list_trash,
+            restore_trash,
+            purge_trash,
+            empty_trash,
             set_task_done,
             save_attachment,
             save_file_attachment,

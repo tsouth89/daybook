@@ -839,10 +839,29 @@ pub fn delete_entity(v: &Path, kind: &str, slug: &str) -> Result<()> {
     let slug = slugify(slug);
     let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
     let path = dir.join(format!("{slug}.md"));
+    let all = read_projects_config(v);
     if path.exists() {
+        // Keep a copy before it goes; the dated history on this page is often
+        // the only place some of it was written down.
+        let markdown = std::fs::read_to_string(&path).unwrap_or_default();
+        let meta = all.iter().find(|p| p.slug == slug).cloned();
+        let label = meta
+            .as_ref()
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| slug.clone());
+        crate::trash::put(
+            v,
+            &label,
+            crate::trash::Payload::Entity {
+                entity_kind: kind.to_string(),
+                slug: slug.clone(),
+                markdown,
+                meta,
+            },
+        )?;
         std::fs::remove_file(&path)?;
     }
-    let known: Vec<ProjectMeta> = read_projects_config(v)
+    let known: Vec<ProjectMeta> = all
         .into_iter()
         .filter(|p| p.slug != slug)
         .collect();

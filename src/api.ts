@@ -133,6 +133,18 @@ export type AskAnswer = {
   used: Entry[];
 };
 
+export type TrashPayload =
+  | { kind: "Entry"; record: Entry }
+  | { kind: "Entity"; entity_kind: string; slug: string; markdown: string; meta: ProjectMeta | null }
+  | { kind: "Inbox"; id: string; contents: string };
+
+export type TrashItem = {
+  id: string;
+  label: string;
+  deleted_at: string;
+  payload: TrashPayload;
+};
+
 export type RebuildReport = {
   recovered: number;
   kept: number;
@@ -177,6 +189,10 @@ export const api = {
   deleteEntry: (entryId: string) => invoke<void>("delete_entry", { entryId }),
   resolveOpenLoop: (entryId: string, line: string) =>
     invoke<void>("resolve_open_loop", { entryId, line }),
+  listTrash: () => invoke<TrashItem[]>("list_trash"),
+  restoreTrash: (id: string) => invoke<string>("restore_trash", { id }),
+  purgeTrash: (id: string) => invoke<void>("purge_trash", { id }),
+  emptyTrash: () => invoke<number>("empty_trash"),
   setEntityParent: (kind: string, slug: string, parent: string) =>
     invoke<void>("set_entity_parent", { kind, slug, parent }),
   setTaskDone: (entryId: string, done: boolean) =>

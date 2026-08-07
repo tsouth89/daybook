@@ -900,3 +900,17 @@ textarea {
 .tree-date { color: var(--dimmer); font-size: 10px; margin-left: 4px; }
 .tree-empty { font-size: 10px; padding: 2px 0 2px 15px; }
 .tree-flag { color: var(--good); font-size: 10px; flex-shrink: 0; }
+
+.trash-modal { width: 560px; max-width: 92vw; }
+.trash-list {
+  list-style: none; padding: 0; margin: 0 0 var(--s4);
+  max-height: 46vh; overflow-y: auto;
+}
+.trash-list li {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s2) 0; border-bottom: 1px solid var(--line-soft);
+  font-size: var(--t-sm);
+}
+.trash-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); }
+.trash-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-btn { width: auto; margin-top: 0; }

@@ -8,6 +8,7 @@ import { NavProvider, type NavTarget } from "./nav";
 import { ViewHostProvider, type ViewHandlers } from "./viewhost";
 import Palette, { type Command } from "./Palette";
 import SidebarTree from "./SidebarTree";
+import Trash from "./Trash";
 import DaysView from "./views/DaysView";
 import HistoryView from "./views/HistoryView";
 import IdeasView from "./views/IdeasView";
@@ -70,6 +71,7 @@ export default function App() {
   /** Navigation held back by an unsaved editor, replayed if the user confirms. */
   const [blockedNav, setBlockedNav] = useState<(() => void) | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   /** Bumped when background work lands, so open views re-query. */
   const [refreshTick, setRefreshTick] = useState(0);
   const handlers = useRef<ViewHandlers>({});
@@ -262,6 +264,12 @@ export default function App() {
         run: () => void api.revealVault().catch((e) => setBanner(errText(e))),
       },
       {
+        id: "trash",
+        label: "Open trash",
+        hint: "restore something deleted",
+        run: () => setTrashOpen(true),
+      },
+      {
         id: "rescan",
         label: "Rescan vault for entries",
         run: () =>
@@ -306,6 +314,7 @@ export default function App() {
                   { label: "Go to Days", shortcut: "⌃⇧D", onClick: () => goTab("days") },
                   { label: "Go to Projects", shortcut: "⌃⇧J", onClick: () => goTab("projects") },
                   { kind: "sep" },
+                  { label: "Trash…", onClick: () => setTrashOpen(true) },
                   {
                     label: "Open vault folder",
                     onClick: () => void api.revealVault().catch((err) => setBanner(errText(err))),
@@ -512,6 +521,16 @@ export default function App() {
               )}
             </main>
             <ContextMenu {...menu.menuProps} />
+            <Trash
+              open={trashOpen}
+              onClose={() => setTrashOpen(false)}
+              onRestored={() => {
+                onChanged();
+                setRefreshTick((n) => n + 1);
+              }}
+              onError={setBanner}
+              onNotice={flash}
+            />
             <Palette
               open={paletteOpen}
               onClose={() => setPaletteOpen(false)}

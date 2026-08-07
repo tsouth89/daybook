@@ -534,6 +534,61 @@ mod tests {
     }
 
     #[test]
+    fn deleting_is_undoable() {
+        let v = tmp();
+        let created = create_entry(
+            &v,
+            EntryRecord {
+                kind: "task".into(),
+                scope: "work".into(),
+                slug: "daybook".into(),
+                title: "Do not lose me".into(),
+                ..rec("", "", "task", "", "2026-08-06")
+            },
+            "DD/MM/YYYY",
+        )
+        .unwrap();
+
+        delete_entry(&v, &created.id).unwrap();
+        assert!(load(&v).is_empty());
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(!text.contains("Do not lose me"));
+
+        let bin = crate::trash::list(&v);
+        assert_eq!(bin.len(), 1);
+        assert_eq!(bin[0].label, "Do not lose me");
+
+        crate::trash::restore(&v, &bin[0].id, "DD/MM/YYYY").unwrap();
+        let back = load(&v);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].title, "Do not lose me");
+        // A task's markdown line comes back too, not just the record.
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(text.contains("Do not lose me"), "got: {text}");
+        assert!(crate::trash::list(&v).is_empty(), "restored items leave the bin");
+    }
+
+    #[test]
+    fn restore_refuses_to_clobber_a_replacement() {
+        let v = tmp();
+        crate::vault::ensure_vault(&v).unwrap();
+        let r = rec("cap-1-e0", "cap-1", "note", "", "2026-08-06");
+        replace_item(&v, "cap-1", &[r.clone()]).unwrap();
+        delete_entry(&v, "cap-1-e0").unwrap();
+
+        // The same id exists again by the time you press undo.
+        let mut newer = r.clone();
+        newer.title = "The newer one".into();
+        replace_item(&v, "cap-1", &[newer]).unwrap();
+
+        let bin = crate::trash::list(&v);
+        assert!(crate::trash::restore(&v, &bin[0].id, "DD/MM/YYYY").is_err());
+        // Refusing must not throw the trashed copy away.
+        assert_eq!(crate::trash::list(&v).len(), 1);
+        assert_eq!(load(&v)[0].title, "The newer one");
+    }
+
+    #[test]
     fn an_open_loop_can_be_closed() {
         let v = tmp();
         crate::vault::ensure_vault(&v).unwrap();
@@ -773,6 +828,10 @@ pub fn as_context(records: &[EntryRecord]) -> String {
 // ---------------------------------------------------------------------------
 
 /// Where a task's owning project link points, given the vault's known entities.
+pub fn entity_link(v: &Path, slug: &str) -> Option<String> {
+    link_for(v, slug)
+}
+
 fn link_for(v: &Path, slug: &str) -> Option<String> {
     let slug = slug.trim();
     if slug.is_empty() {
@@ -896,14 +955,19 @@ pub fn update_entry(v: &Path, updated: &EntryRecord, date_fmt: &str) -> Result<(
 pub fn delete_entry(v: &Path, entry_id: &str) -> Result<()> {
     let mut all = load(v);
     let before = all.len();
-    let was_task = all
-        .iter()
-        .find(|r| r.id == entry_id)
-        .map(|r| r.kind == "task")
-        .unwrap_or(false);
+    let doomed = all.iter().find(|r| r.id == entry_id).cloned();
+    let was_task = doomed.as_ref().map(|r| r.kind == "task").unwrap_or(false);
     all.retain(|r| r.id != entry_id);
     if all.len() == before {
         anyhow::bail!("No entry with id {entry_id}");
+    }
+    if let Some(record) = doomed {
+        let label = if record.title.trim().is_empty() {
+            record.kind.clone()
+        } else {
+            record.title.clone()
+        };
+        crate::trash::put(v, &label, crate::trash::Payload::Entry { record })?;
     }
     write_all(v, &all)?;
     if was_task {
