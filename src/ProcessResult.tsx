@@ -18,6 +18,7 @@ export default function ProcessResult({
     }
   }
   const entries = result.processed.reduce((a, p) => a + p.entry_count, 0);
+  const actions = result.processed.flatMap((p) => p.actions ?? []);
   const created = [...new Set(result.processed.flatMap((p) => p.new_entities))];
   const n = result.processed.length;
 
@@ -39,6 +40,15 @@ export default function ProcessResult({
           </>
         )}
       </div>
+      {actions.length > 0 && (
+        <div className="did">
+          {actions.map((a, i) => (
+            <div key={i}>
+              <span className="did-mark">*</span> {a}
+            </div>
+          ))}
+        </div>
+      )}
       {chips.length > 0 && (
         <div className="chips">
           {chips.map((c) => {

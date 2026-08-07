@@ -158,6 +158,8 @@ export type ItemProcessResult = {
   destinations: string[];
   new_entities: string[];
   summary: string[];
+  /** Structural changes the capture asked for, in plain words. */
+  actions: string[];
 };
 
 export type InboxProcessResult = {

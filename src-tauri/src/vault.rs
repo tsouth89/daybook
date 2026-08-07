@@ -1992,6 +1992,42 @@ Raw: [[raw/2026-08-06]]
     }
 
     #[test]
+    fn renaming_changes_the_label_and_leaves_the_slug_alone() {
+        let v = tmp_vault();
+        let meta = create_entity(&v, "project", "Tool Port", "work").unwrap();
+        assert_eq!(meta.slug, "tool-port");
+
+        rename_entity(&v, "project", "tool-port", "Toolport").unwrap();
+
+        let text = std::fs::read_to_string(projects_dir(&v).join("tool-port.md")).unwrap();
+        assert!(text.contains("name: Toolport"), "got: {text}");
+        assert!(text.contains("# Toolport"), "the page title follows the name");
+        // The slug is what every [[projects/slug]] points at, so it must not move.
+        assert!(projects_dir(&v).join("tool-port.md").exists());
+        assert_eq!(
+            read_projects_config(&v).iter().find(|m| m.slug == "tool-port").unwrap().name,
+            "Toolport"
+        );
+    }
+
+    #[test]
+    fn status_is_set_in_frontmatter_without_duplicating_the_key() {
+        let v = tmp_vault();
+        create_entity(&v, "project", "Billing", "work").unwrap();
+
+        set_entity_status(&v, "project", "billing", "done").unwrap();
+        set_entity_status(&v, "project", "billing", "paused").unwrap();
+
+        let text = std::fs::read_to_string(projects_dir(&v).join("billing.md")).unwrap();
+        assert_eq!(text.matches("status:").count(), 1, "got: {text}");
+        assert!(text.contains("status: paused"));
+        assert_eq!(
+            list_projects(&v, "DD/MM/YYYY").unwrap().iter().find(|p| p.slug == "billing").unwrap().status,
+            "paused"
+        );
+    }
+
+    #[test]
     fn nesting_is_a_property_and_refuses_to_make_rings() {
         let v = tmp_vault();
         for slug in ["toolport", "billing"] {
@@ -2202,6 +2238,106 @@ pub fn set_entity_parent(v: &Path, kind: &str, slug: &str, parent: &str) -> Resu
     let mut known = read_projects_config(v);
     if let Some(m) = known.iter_mut().find(|m| m.slug == slug) {
         m.parent = parent;
+        write_projects_config(v, &known)?;
+    }
+    Ok(())
+}
+
+/// Set a frontmatter key on an entity page, replacing any existing line.
+/// Frontmatter only: a matching line in the body is prose, not a property.
+fn set_entity_field(v: &Path, kind: &str, slug: &str, key: &str, value: &str) -> Result<()> {
+    let kind = if kind == "area" { "area" } else { "project" };
+    let slug = slugify(slug);
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+
+    let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    if !lines.first().map(|l| l.trim() == "---").unwrap_or(false) {
+        anyhow::bail!("{slug} has no frontmatter.");
+    }
+    let Some(end) = lines.iter().skip(1).position(|l| l.trim() == "---").map(|p| p + 1) else {
+        anyhow::bail!("{slug} has unterminated frontmatter.");
+    };
+
+    let prefix = format!("{key}:");
+    let mut replaced = false;
+    for line in lines.iter_mut().take(end) {
+        if line.trim_start().starts_with(&prefix) {
+            *line = format!("{key}: {value}");
+            replaced = true;
+            break;
+        }
+    }
+    if !replaced {
+        lines.insert(end, format!("{key}: {value}"));
+    }
+
+    let mut out = lines.join("\n");
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    std::fs::write(&path, out)?;
+    Ok(())
+}
+
+/// Change an entity's display name. The slug is left alone deliberately: it is
+/// what every `[[projects/slug]]` in the vault points at, and renaming is
+/// something you do to a label, not to every link that mentions it.
+pub fn rename_entity(v: &Path, kind: &str, slug: &str, name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        anyhow::bail!("A page needs a name.");
+    }
+    set_entity_field(v, kind, slug, "name", name)?;
+
+    let slug = slugify(slug);
+    let mut known = read_projects_config(v);
+    if let Some(m) = known.iter_mut().find(|m| m.slug == slug) {
+        m.name = name.to_string();
+        write_projects_config(v, &known)?;
+    }
+
+    // The H1 is the page's own title; leaving it stale would read as a bug.
+    let dir = dir_for_kind(v, if kind == "area" { "area" } else { "project" })
+        .unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        let mut swapped = false;
+        let lines: Vec<String> = text
+            .lines()
+            .map(|l| {
+                if !swapped && l.starts_with("# ") {
+                    swapped = true;
+                    format!("# {name}")
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        if swapped {
+            let mut out = lines.join("\n");
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            std::fs::write(&path, out)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn set_entity_status(v: &Path, kind: &str, slug: &str, status: &str) -> Result<()> {
+    let status = match status.trim() {
+        "paused" => "paused",
+        "done" => "done",
+        _ => "active",
+    };
+    set_entity_field(v, kind, slug, "status", status)?;
+    let slug = slugify(slug);
+    let mut known = read_projects_config(v);
+    if let Some(m) = known.iter_mut().find(|m| m.slug == slug) {
+        m.status = status.to_string();
         write_projects_config(v, &known)?;
     }
     Ok(())

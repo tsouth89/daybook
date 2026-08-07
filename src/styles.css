@@ -914,3 +914,15 @@ textarea {
 .trash-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); }
 .trash-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trash-btn { width: auto; margin-top: 0; }
+
+/* Structural changes a capture asked for. Called out rather than buried in a
+   chip row, because a misread instruction needs to be obvious. */
+.did {
+  margin-top: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: var(--t-sm);
+}
+.did-mark { color: var(--accent); font-weight: 700; margin-right: 2px; }

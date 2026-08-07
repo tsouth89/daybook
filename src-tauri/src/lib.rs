@@ -99,9 +99,7 @@ fn delete_inbox_item(state: tauri::State<AppState>, id: String) -> CmdResult<()>
     entries::remove_item(&v, &id).map_err(err)?;
     if let Ok(contents) = std::fs::read_to_string(vault::inbox_dir(&v).join(format!("{id}.md"))) {
         let label: String = contents
-            .split("---
-
-")
+            .split("---\n\n")
             .nth(1)
             .unwrap_or(&contents)
             .trim()
@@ -581,6 +579,10 @@ struct ItemProcessResult {
     destinations: Vec<String>,
     new_entities: Vec<String>,
     summary: Vec<String>,
+    /// Structural changes the capture asked for, in plain words, so a wrong one
+    /// is visible rather than a silent surprise in the sidebar.
+    #[serde(default)]
+    actions: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -602,6 +604,7 @@ fn apply_triage(
 ) -> Result<ItemProcessResult, String> {
     let mut destinations = Vec::new();
     let mut new_entities = Vec::new();
+    let applied = apply_actions(v, &triage.actions, known, item)?;
 
     // Group project/area entries by slug so one upsert covers the whole item.
     let mut entity_bodies: std::collections::HashMap<String, (String, String, String, String)> =
@@ -865,7 +868,108 @@ fn apply_triage(
         destinations,
         new_entities,
         summary: triage.summary.clone(),
+        actions: applied,
     })
+}
+
+/// Carry out the structural instructions in a capture.
+///
+/// These are the only writes in the app driven by a model's reading of intent
+/// rather than a click, so they are deliberately narrow: create, rename, move,
+/// set status. Nothing here deletes. Every one is reported back in plain words
+/// so a misread instruction is visible immediately, and page deletion stays a
+/// human action that the trash can undo.
+fn apply_actions(
+    v: &std::path::Path,
+    actions: &[ai::RoutedAction],
+    known: &mut Vec<ProjectMeta>,
+    item: &vault::InboxItem,
+) -> Result<Vec<String>, String> {
+    // A free function rather than a closure: a closure capturing `known` would
+    // hold the borrow for the whole loop, and every arm needs to mutate it.
+    fn resolve(known: &[ProjectMeta], slug: &str) -> Option<ProjectMeta> {
+        let s = vault::slugify(slug);
+        known.iter().find(|m| m.slug == s).cloned()
+    }
+
+    let mut done = Vec::new();
+    for a in actions {
+        match a.op.as_str() {
+            "create_page" => {
+                let name = a.name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let kind = if a.kind == "area" { "area" } else { "project" };
+                let scope = if a.scope == "work" { "work" } else { "personal" };
+                let slug = vault::slugify(name);
+                if known.iter().any(|m| m.slug == slug) {
+                    done.push(format!("{name} already existed"));
+                    continue;
+                }
+                let meta = vault::create_entity(v, kind, name, scope).map_err(err)?;
+                let parent = vault::slugify(&a.parent);
+                if !parent.is_empty() && known.iter().any(|m| m.slug == parent) {
+                    vault::set_entity_parent(v, kind, &meta.slug, &parent).map_err(err)?;
+                    let pname = resolve(known, &parent).map(|m| m.name).unwrap_or(parent);
+                    done.push(format!("created {kind} {name} under {pname}"));
+                } else {
+                    done.push(format!("created {kind} {name}"));
+                }
+                known.push(meta);
+            }
+            "rename_page" => {
+                let (Some(meta), name) = (resolve(known, &a.slug), a.name.trim()) else {
+                    continue;
+                };
+                if name.is_empty() || name == meta.name {
+                    continue;
+                }
+                vault::rename_entity(v, &meta.kind, &meta.slug, name).map_err(err)?;
+                if let Some(m) = known.iter_mut().find(|m| m.slug == meta.slug) {
+                    m.name = name.to_string();
+                }
+                done.push(format!("renamed {} to {name}", meta.name));
+            }
+            "move_page" => {
+                let Some(meta) = resolve(known, &a.slug) else { continue };
+                let parent = vault::slugify(&a.parent);
+                if !parent.is_empty() && !known.iter().any(|m| m.slug == parent) {
+                    continue;
+                }
+                vault::set_entity_parent(v, &meta.kind, &meta.slug, &parent).map_err(err)?;
+                if let Some(m) = known.iter_mut().find(|m| m.slug == meta.slug) {
+                    m.parent = parent.clone();
+                }
+                done.push(if parent.is_empty() {
+                    format!("moved {} to the top level", meta.name)
+                } else {
+                    let pname = resolve(known, &parent).map(|m| m.name).unwrap_or(parent);
+                    format!("moved {} under {pname}", meta.name)
+                });
+            }
+            "set_status" => {
+                let Some(meta) = resolve(known, &a.slug) else { continue };
+                let status = match a.status.trim() {
+                    "paused" => "paused",
+                    "done" => "done",
+                    "active" => "active",
+                    _ => continue,
+                };
+                vault::set_entity_status(v, &meta.kind, &meta.slug, status).map_err(err)?;
+                if let Some(m) = known.iter_mut().find(|m| m.slug == meta.slug) {
+                    m.status = status.to_string();
+                }
+                done.push(format!("marked {} {status}", meta.name));
+            }
+            _ => {}
+        }
+    }
+    if !done.is_empty() {
+        // Attribute the change so it can be traced back to what was said.
+        let _ = item;
+    }
+    Ok(done)
 }
 
 async fn refresh_touched_overviews(

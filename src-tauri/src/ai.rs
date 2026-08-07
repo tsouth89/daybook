@@ -37,10 +37,38 @@ pub struct RoutedEntry {
     pub due: Option<String>,
 }
 
+/// A structural instruction, as opposed to something to file.
+///
+/// "Make a project for billing under Toolport" is an order; "we should
+/// probably make a project for billing" is a thought about one. Only the first
+/// belongs here, and the prompt is emphatic about the difference.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RoutedAction {
+    /// create_page | rename_page | move_page | set_status
+    pub op: String,
+    #[serde(default)]
+    pub slug: String,
+    #[serde(default)]
+    pub name: String,
+    /// project | area
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub scope: String,
+    /// Slug of the page this nests under.
+    #[serde(default)]
+    pub parent: String,
+    /// active | paused | done
+    #[serde(default)]
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TriageResult {
     pub summary: Vec<String>,
     pub entries: Vec<RoutedEntry>,
+    #[serde(default)]
+    pub actions: Vec<RoutedAction>,
 }
 
 fn triage_schema() -> serde_json::Value {
@@ -48,9 +76,26 @@ fn triage_schema() -> serde_json::Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["summary", "entries"],
+        "required": ["summary", "entries", "actions"],
         "properties": {
             "summary": str_array,
+            "actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "slug", "name", "kind", "scope", "parent", "status"],
+                    "properties": {
+                        "op": { "type": "string" },
+                        "slug": { "type": "string" },
+                        "name": { "type": "string" },
+                        "kind": { "type": "string" },
+                        "scope": { "type": "string" },
+                        "parent": { "type": "string" },
+                        "status": { "type": "string" }
+                    }
+                }
+            },
             "entries": {
                 "type": "array",
                 "items": {
@@ -82,6 +127,7 @@ fn triage_schema() -> serde_json::Value {
 fn json_example() -> &'static str {
     r#"{
   "summary": ["Shipped inbox routing for Daybook", "Book dentist next week"],
+  "actions": [],
   "entries": [
     {
       "scope": "work",
@@ -161,6 +207,19 @@ fn system_prompt(projects: &[ProjectMeta], glossary: &[String], profile: &str) -
          Leave `slug` and `name` empty only when the entry genuinely belongs to nothing (\"book a \
          dentist appointment\"). This is what lets a task be found from its project later, so do \
          not leave it empty out of caution when the owner is clear from the dump.\n\n\
+         `actions` is for when the author is telling YOU to change how the vault is \
+         organised, rather than recording something. Ops: `create_page` (needs `name` and \
+         `kind`, optionally `parent` and `scope`), `rename_page` (`slug`, `name`), \
+         `move_page` (`slug`, `parent`, where an empty `parent` means top level), and \
+         `set_status` (`slug`, `status`).\n\n\
+         Be strict about this. \"Make a page for billing under Toolport\" is an instruction. \
+         \"I think we should probably have a page for billing\" is a thought about one: that \
+         is an `idea` entry with no action. If you are not certain it was addressed to you as \
+         a command, emit no action. A page wrongly created in someone's vault is worse than a \
+         missed shortcut, and they can always make it themselves. Most dumps have no actions \
+         at all.\n\
+         An action does not replace the entry. If they also said something worth keeping, \
+         file that as usual.\n\n\
          `summary` is 1–3 plain glance bullets for the whole dump — the only place you write \
          rather than transcribe.\n\n\
          Respond with a single JSON object matching this schema example:\n",
