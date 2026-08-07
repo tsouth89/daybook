@@ -1,3 +1,6 @@
+[workspace]
+members = ["core", "mcp"]
+
 [package]
 name = "daybook"
 version = "0.1.0"
@@ -13,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+daybook-core = { path = "core" }
 tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"

@@ -1,0 +1,17 @@
+[package]
+name = "daybook-core"
+version = "0.1.0"
+edition = "2021"
+description = "Vault, item layer, and trash for Daybook. No UI, no Tauri."
+
+[lib]
+name = "daybook_core"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+base64 = "0.22"
+walkdir = "2"
+sys-locale = "0.3.2"

@@ -163,8 +163,15 @@ Point your client at it. For Claude Desktop, in `claude_desktop_config.json`:
 }
 ```
 
-Or `claude mcp add daybook -- "C:\Program Files\Daybook\daybook-mcp.exe"`.
-Running from a checkout, the binary is at `src-tauri/target/release/daybook-mcp.exe`.
+Or `claude mcp add daybook -- <path>`.
+
+Build it once:
+
+```sh
+cargo build --release -p daybook-mcp --manifest-path src-tauri/Cargo.toml
+```
+
+which puts it at `src-tauri/target/release/daybook-mcp.exe`.
 
 | Tool | Does |
 |---|---|
@@ -201,7 +208,6 @@ Produces three things under `src-tauri/target/release/`:
 | Installer (recommended) | `bundle/nsis/Daybook_<ver>_x64-setup.exe` | Normal install, Start-menu entry, uninstaller |
 | MSI | `bundle/msi/Daybook_<ver>_x64_en-US.msi` | Group-policy / scripted installs |
 | Bare executable | `daybook.exe` | Run from anywhere without installing |
-| MCP server | `daybook-mcp.exe` | Let an assistant read and write the vault |
 
 The bare `daybook.exe` runs on its own — Windows 11 already ships the WebView2
 runtime it needs. It is not *fully* portable, though: settings and API keys live
@@ -219,11 +225,13 @@ pnpm tauri dev      # run
 pnpm tauri build    # bundle
 ```
 
-Rust backend under `src-tauri/src`:
+Three Rust crates under `src-tauri/`:
 
-- `vault.rs` — file IO and the vault layout
-- `ai.rs` — triage call, prompt, and Markdown renderers
-- `entries.rs` — the item layer: records, queries, task state
-- `backfill.rs` — recovering records from markdown written before the index
+- `core/` — the vault, item layer, backfill, and trash. No Tauri, no UI, so the
+  MCP server can share it. Keeping these inside the app package meant a second
+  binary confused the bundler into shipping the wrong one as the app.
+- `mcp/` — the MCP server, JSON-RPC on stdio
+- the app itself (`src/`):
+  - `ai.rs` — triage call, prompt, and Markdown renderers
 - `config.rs` — settings and API key resolution
 - `lib.rs` — Tauri commands, global hotkey, window wiring

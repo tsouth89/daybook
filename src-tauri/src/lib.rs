@@ -1,10 +1,8 @@
-pub mod ai;
-pub mod config;
-pub mod backfill;
-pub mod datetime;
-pub mod entries;
-pub mod trash;
-pub mod vault;
+mod ai;
+
+// The vault, the item layer, and the trash live in daybook-core so the MCP
+// server can share them without pulling in Tauri.
+use daybook_core::{backfill, config, entries, trash, vault};
 
 use base64::Engine;
 use config::Settings;

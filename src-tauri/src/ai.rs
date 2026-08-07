@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::vault::ProjectMeta;
+use daybook_core::vault::ProjectMeta;
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -301,14 +301,14 @@ fn load_attachment_images(
     text: &str,
 ) -> Result<Vec<AttachmentImage>> {
     let mut out = Vec::new();
-    for rel in crate::vault::extract_attachment_refs(text) {
-        let bytes = crate::vault::read_attachment_bytes(vault, &rel)?;
+    for rel in daybook_core::vault::extract_attachment_refs(text) {
+        let bytes = daybook_core::vault::read_attachment_bytes(vault, &rel)?;
         // Skip huge images — vision APIs bill per pixel and 4MB is plenty for a screenshot.
         if bytes.len() > 4 * 1024 * 1024 {
             continue;
         }
         out.push(AttachmentImage {
-            mime: crate::vault::attachment_mime(&rel),
+            mime: daybook_core::vault::attachment_mime(&rel),
             b64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes),
         });
     }
@@ -368,9 +368,9 @@ fn normalize_result(mut result: TriageResult) -> TriageResult {
         };
         if e.kind == "project" || e.kind == "area" {
             if e.slug.trim().is_empty() {
-                e.slug = crate::vault::slugify(&e.name);
+                e.slug = daybook_core::vault::slugify(&e.name);
             } else {
-                e.slug = crate::vault::slugify(&e.slug);
+                e.slug = daybook_core::vault::slugify(&e.slug);
             }
             if e.name.trim().is_empty() {
                 e.name = e.slug.clone();

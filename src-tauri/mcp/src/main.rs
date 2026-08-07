@@ -13,7 +13,7 @@
 //! Writes go through the same functions the app uses, so trash, task-line
 //! rewriting, and index invariants all hold. Nothing here deletes a page.
 
-use daybook_lib::{config, entries, vault};
+use daybook_core::{config, entries, vault};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 
