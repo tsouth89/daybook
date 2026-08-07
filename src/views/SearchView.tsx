@@ -12,6 +12,7 @@ import { useFormat } from "../FormatContext";
 import { pathToNav, useNavigate } from "../nav";
 
 type Scope = "" | "personal" | "work";
+type SortKey = "date" | "title" | "kind" | "project" | "due";
 type Kind = "" | "project" | "area" | "task" | "idea" | "note";
 
 /**
@@ -36,6 +37,9 @@ export default function SearchView({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [ran, setRan] = useState(false);
   const [editing, setEditing] = useState<Entry | null>(null);
+  const [view, setView] = useState<"list" | "table">("list");
+  const [sort, setSort] = useState<SortKey>("date");
+  const [asc, setAsc] = useState(false);
   const menu = useContextMenu();
   const navigate = useNavigate();
   const fmt = useFormat();
@@ -93,6 +97,40 @@ export default function SearchView({
     } else {
       navigate({ type: "day", date: e.date, pane: "note" });
     }
+  }
+
+  const sorted = [...entries].sort((a, b) => {
+    const pick = (e: Entry) =>
+      sort === "title"
+        ? e.title.toLowerCase()
+        : sort === "kind"
+          ? e.kind
+          : sort === "project"
+            ? (e.name || e.slug).toLowerCase()
+            : sort === "due"
+              ? (e.due ?? "￿")
+              : e.date;
+    const av = pick(a);
+    const bv = pick(b);
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return asc ? cmp : -cmp;
+  });
+
+  function sortBy(k: SortKey) {
+    if (k === sort) setAsc((v) => !v);
+    else {
+      setSort(k);
+      setAsc(k === "title" || k === "project");
+    }
+  }
+
+  function th(k: SortKey, label: string) {
+    return (
+      <th onClick={() => sortBy(k)} className={sort === k ? "sorted" : ""}>
+        {label}
+        {sort === k && <span className="sort-caret">{asc ? "▲" : "▼"}</span>}
+      </th>
+    );
   }
 
   const grouped = hits.reduce<Record<string, SearchHit[]>>((acc, h) => {
@@ -156,6 +194,21 @@ export default function SearchView({
             </option>
           ))}
         </select>
+        <span className="grow" />
+        <div className="tabs">
+          <button
+            className={`tab ${view === "list" ? "active" : ""}`}
+            onClick={() => setView("list")}
+          >
+            list
+          </button>
+          <button
+            className={`tab ${view === "table" ? "active" : ""}`}
+            onClick={() => setView("table")}
+          >
+            table
+          </button>
+        </div>
         {(hasFilter || query) && (
           <button
             className="linkbtn tiny"
@@ -180,9 +233,68 @@ export default function SearchView({
       )}
 
       <div className="content">
-        {entries.length > 0 && (
+        {entries.length > 0 && view === "table" && (
+          <table className="entry-table">
+            <thead>
+              <tr>
+                {th("title", "Title")}
+                {th("kind", "Kind")}
+                {th("project", "Project")}
+                {th("due", "Due")}
+                {th("date", "Date")}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((e) => (
+                <tr
+                  key={e.id}
+                  onDoubleClick={() => setEditing(e)}
+                  onContextMenu={(ev) =>
+                    menu.open(ev, [
+                      { label: "Edit…", onClick: () => setEditing(e) },
+                      { label: "Open", onClick: () => openEntry(e) },
+                    ])
+                  }
+                >
+                  <td className="cell-title">
+                    {e.kind === "task" && (
+                      <input
+                        type="checkbox"
+                        checked={e.done}
+                        onChange={() => {
+                          void api
+                            .setTaskDone(e.id, !e.done)
+                            .then(run)
+                            .catch((err) => onError(errText(err)));
+                        }}
+                        aria-label={e.title}
+                      />
+                    )}
+                    <span className={e.done ? "struck" : ""}>{e.title || "(untitled)"}</span>
+                  </td>
+                  <td className="dim">{e.kind}</td>
+                  <td>
+                    {e.slug ? (
+                      <button className="linkbtn" onClick={() => openEntry(e)}>
+                        {e.name || e.slug}
+                      </button>
+                    ) : (
+                      <span className="dim">—</span>
+                    )}
+                  </td>
+                  <td className={e.due && e.due < new Date().toISOString().slice(0, 10) ? "bad" : "dim"}>
+                    {e.due ? fmt.date(e.due) : "—"}
+                  </td>
+                  <td className="dim mono tiny">{fmt.date(e.date)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {entries.length > 0 && view === "list" && (
           <div className="entry-results">
-            {entries.map((e) => (
+            {sorted.map((e) => (
               <div
                 key={e.id}
                 className="entry-hit"

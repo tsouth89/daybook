@@ -806,3 +806,25 @@ textarea {
   background: color-mix(in srgb, var(--bad) 12%, transparent);
 }
 .md code, .md pre { background: var(--bg-3); }
+
+/* ------------------------------------------------------------ table view */
+
+.entry-table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+.entry-table th {
+  text-align: left; font-weight: 600; color: var(--dim);
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.6px;
+  padding: var(--s2); border-bottom: 1px solid var(--line);
+  cursor: pointer; user-select: none; white-space: nowrap;
+  position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+.entry-table th:hover { color: var(--fg); }
+.entry-table th.sorted { color: var(--fg); }
+.sort-caret { font-size: 8px; margin-left: 4px; vertical-align: middle; }
+.entry-table td {
+  padding: var(--s2); border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+.entry-table tbody tr:hover { background: var(--bg-3); }
+.cell-title { display: flex; align-items: baseline; gap: var(--s2); }
+.cell-title input[type="checkbox"] { accent-color: var(--accent); }
+.struck { text-decoration: line-through; color: var(--dim); }
