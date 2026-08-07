@@ -580,14 +580,17 @@ mod tests {
     use crate::entries;
 
     fn tmp() -> std::path::PathBuf {
+        // A counter, not a timestamp: Windows clock granularity is ~15ms, so
+        // parallel tests starting in the same tick would share a directory.
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let p = std::env::temp_dir().join(format!(
-            "daybook-backfill-{}-{}",
+            "daybook-test-{}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            module_path!().replace("::", "-"),
+            n
         ));
+        let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         crate::vault::ensure_vault(&p).unwrap();
         p

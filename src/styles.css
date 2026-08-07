@@ -861,3 +861,42 @@ textarea {
 .digest-time { margin-right: var(--s2); }
 .digest-sub { list-style: none; padding: 0 0 0 var(--s3); margin: 2px 0 0; }
 .digest-sub li { color: var(--dim); font-size: var(--t-xs); line-height: 1.5; }
+
+/* ------------------------------------------------------------------ tree */
+
+.tree {
+  margin-top: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+  /* Sized to content but capped, so a long project list scrolls instead of
+     pushing the vault box off the bottom of the sidebar. */
+  flex: 0 1 auto;
+  max-height: 45vh;
+  overflow-y: auto;
+  min-height: 0;
+}
+.tree-row {
+  display: flex; align-items: center; gap: 2px;
+  border-radius: var(--radius-sm);
+  padding-right: var(--s1);
+}
+.tree-row:hover { background: var(--bg-3); }
+.tree-row.active { background: var(--bg-3); box-shadow: inset 2px 0 0 var(--accent); }
+.tree-caret {
+  background: none; border: none; color: var(--dimmer);
+  cursor: pointer; font-size: 9px; line-height: 1;
+  width: 13px; flex-shrink: 0; padding: 0;
+  transition: transform var(--ease);
+}
+.tree-caret.open { transform: rotate(90deg); }
+.tree-label {
+  background: none; border: none; color: var(--dim);
+  cursor: pointer; text-align: left; padding: 4px 0;
+  font-size: var(--t-sm); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tree-row:hover .tree-label, .tree-row.active .tree-label { color: var(--fg); }
+.tree-entry .tree-label { font-size: var(--t-xs); }
+.tree-date { color: var(--dimmer); font-size: 10px; margin-left: 4px; }
+.tree-empty { font-size: 10px; padding: 2px 0 2px 15px; }
+.tree-flag { color: var(--good); font-size: 10px; flex-shrink: 0; }

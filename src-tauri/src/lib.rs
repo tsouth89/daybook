@@ -197,6 +197,17 @@ fn resolve_open_loop(
     entries::resolve_open(&state.settings().vault(), &entry_id, &line).map_err(err)
 }
 
+/// Nest one page under another. Files never move, so links survive.
+#[tauri::command]
+fn set_entity_parent(
+    state: tauri::State<AppState>,
+    kind: String,
+    slug: String,
+    parent: String,
+) -> CmdResult<()> {
+    vault::set_entity_parent(&state.settings().vault(), &kind, &slug, &parent).map_err(err)
+}
+
 /// Recover item records from markdown written before the index existed. Costs
 /// nothing — it parses the vault rather than re-triaging through the model.
 #[tauri::command]
@@ -741,6 +752,7 @@ fn apply_triage(
                 kind: kind.clone(),
                 scope: scope.clone(),
                 status: "active".into(),
+                parent: String::new(),
                 aliases: vec![],
                 description: String::new(),
             });
@@ -1188,6 +1200,7 @@ pub fn run() {
             create_entry,
             delete_entry,
             resolve_open_loop,
+            set_entity_parent,
             set_task_done,
             save_attachment,
             save_file_attachment,

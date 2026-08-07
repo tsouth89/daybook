@@ -7,6 +7,7 @@ import { FormatProvider } from "./FormatContext";
 import { NavProvider, type NavTarget } from "./nav";
 import { ViewHostProvider, type ViewHandlers } from "./viewhost";
 import Palette, { type Command } from "./Palette";
+import SidebarTree from "./SidebarTree";
 import DaysView from "./views/DaysView";
 import HistoryView from "./views/HistoryView";
 import IdeasView from "./views/IdeasView";
@@ -364,6 +365,12 @@ export default function App() {
                   </button>
                 )
               )}
+              <SidebarTree
+                refreshTick={refreshTick}
+                activeSlug={focusEntity ? focusEntity.split(":")[1] : null}
+                onError={setBanner}
+                onNotice={flash}
+              />
               <div className="spacer" />
               {settings && (
                 <div

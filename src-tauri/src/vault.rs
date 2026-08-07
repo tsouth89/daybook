@@ -438,6 +438,12 @@ pub struct ProjectMeta {
     /// `active` | `paused` | `done`. Only projects really finish; areas stay active.
     #[serde(default = "default_status")]
     pub status: String,
+    /// Slug of the entity this nests under. Empty for a top-level one.
+    ///
+    /// Nesting is a property rather than a folder so that re-parenting never
+    /// moves a file, which would break every `[[projects/slug]]` pointing at it.
+    #[serde(default)]
+    pub parent: String,
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(default)]
@@ -814,6 +820,7 @@ pub fn create_entity(
         kind: kind.to_string(),
         scope: scope.to_string(),
         status: "active".into(),
+        parent: String::new(),
         aliases: vec![],
         description: String::new(),
     };
@@ -860,6 +867,8 @@ pub struct ProjectEntry {
     pub scope: String,
     /// `active` | `paused` | `done`. Frontmatter, so it is hand-editable.
     pub status: String,
+    /// Slug of the parent entity; empty at top level.
+    pub parent: String,
     pub last_date: String,
     pub day_count: usize,
 }
@@ -893,6 +902,12 @@ fn list_entity_dir(dir: &Path, kind: &str, date_fmt: &str) -> Vec<ProjectEntry> 
             .unwrap_or("active")
             .trim()
             .to_string();
+        let parent = text
+            .lines()
+            .find_map(|l| l.strip_prefix("parent: "))
+            .unwrap_or("")
+            .trim()
+            .to_string();
         // Date headings are written in the user's display format, so an ISO-only
         // parse finds nothing and every project looks untouched.
         let mut dates: Vec<String> = text
@@ -908,6 +923,7 @@ fn list_entity_dir(dir: &Path, kind: &str, date_fmt: &str) -> Vec<ProjectEntry> 
             kind: kind.to_string(),
             scope,
             status: if status.is_empty() { "active".into() } else { status },
+            parent,
             last_date: dates.last().cloned().unwrap_or_default(),
             day_count: dates.len(),
         });
@@ -1939,6 +1955,71 @@ Raw: [[raw/2026-08-06]]
         splice_day_item(existing, id, glance, section, "2026-08-06", "06/08/2026")
     }
 
+    fn tmp_vault() -> std::path::PathBuf {
+        // A counter, not a timestamp: Windows clock granularity is ~15ms, so
+        // parallel tests starting in the same tick would share a directory.
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "daybook-test-{}-{}-{}",
+            std::process::id(),
+            module_path!().replace("::", "-"),
+            n
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        ensure_vault(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn nesting_is_a_property_and_refuses_to_make_rings() {
+        let v = tmp_vault();
+        for slug in ["toolport", "billing"] {
+            std::fs::write(
+                projects_dir(&v).join(format!("{slug}.md")),
+                format!("---
+slug: {slug}
+name: {slug}
+type: project
+scope: work
+status: active
+---
+
+# {slug}
+"),
+            )
+            .unwrap();
+        }
+        write_projects_config(
+            &v,
+            &[
+                ProjectMeta { slug: "toolport".into(), name: "Toolport".into(), kind: "project".into(), scope: "work".into(), status: "active".into(), parent: String::new(), aliases: vec![], description: String::new() },
+                ProjectMeta { slug: "billing".into(), name: "Billing".into(), kind: "project".into(), scope: "work".into(), status: "active".into(), parent: String::new(), aliases: vec![], description: String::new() },
+            ],
+        )
+        .unwrap();
+
+        set_entity_parent(&v, "project", "billing", "toolport").unwrap();
+        let text = std::fs::read_to_string(projects_dir(&v).join("billing.md")).unwrap();
+        assert!(text.contains("parent: toolport"), "got: {text}");
+        // The file did not move, so links to it still resolve.
+        assert!(projects_dir(&v).join("billing.md").exists());
+        assert_eq!(
+            list_projects(&v, "DD/MM/YYYY").unwrap().iter().find(|p| p.slug == "billing").unwrap().parent,
+            "toolport"
+        );
+
+        // A ring would render as an orphaned loop no tree could draw.
+        assert!(set_entity_parent(&v, "project", "toolport", "billing").is_err());
+        assert!(set_entity_parent(&v, "project", "billing", "billing").is_err());
+
+        // Clearing puts it back at the top level without leaving a stray line.
+        set_entity_parent(&v, "project", "billing", "").unwrap();
+        let text = std::fs::read_to_string(projects_dir(&v).join("billing.md")).unwrap();
+        assert!(!text.contains("parent:"), "got: {text}");
+    }
+
     #[test]
     fn new_item_preserves_hand_written_content() {
         let out = splice(
@@ -2026,4 +2107,83 @@ pub fn list_inbox_idle(v: &Path, min_idle_secs: u64) -> Result<Vec<InboxItem>> {
         }
     }
     Ok(out)
+}
+
+/// Re-parent an entity. Nesting is a property, so nothing moves on disk and
+/// every `[[projects/slug]]` pointing at this page keeps working.
+pub fn set_entity_parent(v: &Path, kind: &str, slug: &str, parent: &str) -> Result<()> {
+    let slug = slugify(slug);
+    let parent = if parent.trim().is_empty() {
+        String::new()
+    } else {
+        slugify(parent)
+    };
+    if parent == slug {
+        anyhow::bail!("A page cannot be its own parent.");
+    }
+
+    // Walk up from the proposed parent; if we meet ourselves, this would make
+    // an orphaned ring that no tree could render.
+    let known = read_projects_config(v);
+    let mut cursor = parent.clone();
+    let mut hops = 0;
+    while !cursor.is_empty() && hops < 64 {
+        if cursor == slug {
+            anyhow::bail!("That would nest {slug} inside itself.");
+        }
+        cursor = known
+            .iter()
+            .find(|m| m.slug == cursor)
+            .map(|m| m.parent.clone())
+            .unwrap_or_default();
+        hops += 1;
+    }
+
+    let kind = if kind == "area" { "area" } else { "project" };
+    let dir = dir_for_kind(v, kind).unwrap_or_else(|| projects_dir(v));
+    let path = dir.join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+
+    // Frontmatter only; a `parent:` line in the body is prose, not a property.
+    let mut lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
+    let fm_end = if lines.first().map(|l| l.trim() == "---").unwrap_or(false) {
+        lines.iter().skip(1).position(|l| l.trim() == "---").map(|p| p + 1)
+    } else {
+        None
+    };
+    let Some(fm_end) = fm_end else {
+        anyhow::bail!("{slug} has no frontmatter to set a parent in.");
+    };
+
+    lines.retain({
+        let mut i = 0usize;
+        move |l| {
+            i += 1;
+            !(i <= fm_end + 1 && l.trim_start().starts_with("parent:"))
+        }
+    });
+    if !parent.is_empty() {
+        let end = lines
+            .iter()
+            .skip(1)
+            .position(|l| l.trim() == "---")
+            .map(|p| p + 1)
+            .unwrap_or(1);
+        lines.insert(end, format!("parent: {parent}"));
+    }
+
+    let mut out = lines.join("\n");
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    std::fs::write(&path, out)?;
+
+    // projects.json is what triage reads, so keep it in step.
+    let mut known = read_projects_config(v);
+    if let Some(m) = known.iter_mut().find(|m| m.slug == slug) {
+        m.parent = parent;
+        write_projects_config(v, &known)?;
+    }
+    Ok(())
 }

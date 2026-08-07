@@ -39,6 +39,8 @@ export type ProjectEntry = {
   scope: string;
   /** active | paused | done — frontmatter, so hand-editable. */
   status: string;
+  /** Slug of the entity this nests under; empty at top level. */
+  parent: string;
   last_date: string;
   day_count: number;
 };
@@ -49,6 +51,7 @@ export type ProjectMeta = {
   kind: string;
   scope: string;
   status: string;
+  parent: string;
   aliases: string[];
   description: string;
 };
@@ -174,6 +177,8 @@ export const api = {
   deleteEntry: (entryId: string) => invoke<void>("delete_entry", { entryId }),
   resolveOpenLoop: (entryId: string, line: string) =>
     invoke<void>("resolve_open_loop", { entryId, line }),
+  setEntityParent: (kind: string, slug: string, parent: string) =>
+    invoke<void>("set_entity_parent", { kind, slug, parent }),
   setTaskDone: (entryId: string, done: boolean) =>
     invoke<void>("set_task_done", { entryId, done }),
   saveAttachment: (dataBase64: string, ext: string) =>
