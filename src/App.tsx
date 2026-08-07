@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errText, type DayEntry, type Settings } from "./api";
 import ConfirmDialog from "./ConfirmDialog";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { FormatProvider } from "./FormatContext";
 import { NavProvider, type NavTarget } from "./nav";
 import { ViewHostProvider, type ViewHandlers } from "./viewhost";
+import Palette, { type Command } from "./Palette";
 import DaysView from "./views/DaysView";
 import HistoryView from "./views/HistoryView";
 import IdeasView from "./views/IdeasView";
@@ -66,6 +67,7 @@ export default function App() {
   const [focusEntity, setFocusEntity] = useState<string | null>(null);
   /** Navigation held back by an unsaved editor, replayed if the user confirms. */
   const [blockedNav, setBlockedNav] = useState<(() => void) | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const handlers = useRef<ViewHandlers>({});
   const menu = useContextMenu();
 
@@ -154,6 +156,15 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The palette is reachable from anywhere, including inside an editor.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === "k" || key === "o") {
+          e.preventDefault();
+          setPaletteOpen((v) => !v);
+          return;
+        }
+      }
       if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
       const k = e.key.toLowerCase();
@@ -187,6 +198,56 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [goTab]);
+
+  const paletteCommands = useMemo<Command[]>(() => {
+    const tabs: [Tab, string][] = [
+      ["home", "Home"],
+      ["today", "Today"],
+      ["inbox", "Inbox"],
+      ["days", "Days"],
+      ["personal", "Personal"],
+      ["projects", "Projects"],
+      ["tasks", "Tasks"],
+      ["ideas", "Ideas"],
+      ["history", "History"],
+      ["ask", "Ask"],
+      ["search", "Search"],
+      ["settings", "Settings"],
+    ];
+    return [
+      ...tabs.map(([t, label]) => ({
+        id: `go-${t}`,
+        label: `Go to ${label}`,
+        run: () => goTab(t),
+      })),
+      {
+        id: "capture",
+        label: "New capture",
+        hint: "Ctrl+Shift+E",
+        run: () => void api.showCapture(),
+      },
+      {
+        id: "process",
+        label: "Process pending in this view",
+        hint: "Ctrl+Shift+P",
+        run: () => handlers.current.process?.(),
+      },
+      {
+        id: "reveal",
+        label: "Open vault folder",
+        run: () => void api.revealVault().catch((e) => setBanner(errText(e))),
+      },
+      {
+        id: "rescan",
+        label: "Rescan vault for entries",
+        run: () =>
+          void api
+            .rebuildEntryIndex()
+            .then((r) => flash(`Recovered ${r.recovered} · kept ${r.kept}`))
+            .catch((e) => setBanner(errText(e))),
+      },
+    ];
   }, [goTab]);
 
   const needsKey = settings && !hasProviderKey(settings);
@@ -412,6 +473,12 @@ export default function App() {
               )}
             </main>
             <ContextMenu {...menu.menuProps} />
+            <Palette
+              open={paletteOpen}
+              onClose={() => setPaletteOpen(false)}
+              navigate={navigate}
+              commands={paletteCommands}
+            />
             <ConfirmDialog
               open={!!blockedNav}
               title="Leave without saving?"

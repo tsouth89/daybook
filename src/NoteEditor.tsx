@@ -3,6 +3,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView } from "@codemirror/view";
+import { wikilinkCompletion } from "./wikilink";
 import Markdown from "./Markdown";
 import type { MenuItem } from "./ContextMenu";
 
@@ -79,7 +80,12 @@ export default function NoteEditor({
             value={value}
             height="100%"
             theme={oneDark}
-            extensions={[markdown(), editorTheme, EditorView.lineWrapping]}
+            extensions={[
+              markdown(),
+              editorTheme,
+              EditorView.lineWrapping,
+              wikilinkCompletion(),
+            ]}
             onChange={onChange}
             basicSetup={{
               lineNumbers: true,
