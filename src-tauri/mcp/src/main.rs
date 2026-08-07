@@ -215,6 +215,46 @@ fn tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "daybook_describe_page",
+            "description": "Set what a project or area IS - its standing one-or-two-line                 description, shown at the top of the page and on the home screen. This is the                 purpose, not an update: say what the thing is, not what happened today.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["slug", "text"],
+                "properties": {
+                    "slug": str_prop("Project or area slug."),
+                    "text": str_prop("One or two plain sentences."),
+                    "kind": str_prop("project or area; defaults to project.")
+                }
+            }
+        }),
+        json!({
+            "name": "daybook_add_objective",
+            "description": "Add an objective to a project's checklist.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["slug", "text"],
+                "properties": {
+                    "slug": str_prop("Project or area slug."),
+                    "text": str_prop("What the objective is."),
+                    "kind": str_prop("project or area; defaults to project.")
+                }
+            }
+        }),
+        json!({
+            "name": "daybook_complete_objective",
+            "description": "Tick or untick one objective by its position, as listed by                 daybook_read_page.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["slug", "index"],
+                "properties": {
+                    "slug": str_prop("Project or area slug."),
+                    "index": { "type": "integer", "description": "Zero-based position." },
+                    "done": { "type": "boolean", "description": "Defaults to true." },
+                    "kind": str_prop("project or area; defaults to project.")
+                }
+            }
+        }),
+        json!({
             "name": "daybook_append_to_page",
             "description": "Append dated notes to a project or area page under today's heading.",
             "inputSchema": {
@@ -366,6 +406,41 @@ fn call(name: &str, args: &Value) -> Result<String, String> {
                 return Ok(format!("Created {kind} \"{name}\" ({}) under {parent}.", meta.slug));
             }
             Ok(format!("Created {kind} \"{name}\" ({}).", meta.slug))
+        }
+
+        "daybook_describe_page" => {
+            let text = s(args, "text");
+            if text.trim().is_empty() {
+                return Err("Nothing to describe it with.".into());
+            }
+            let kind = s(args, "kind");
+            let kind = if kind == "area" { "area" } else { "project" };
+            let slug = s(args, "slug");
+            vault::set_entity_about(&v, kind, &slug, &text).map_err(|e| e.to_string())?;
+            Ok(format!("Described {slug}."))
+        }
+
+        "daybook_add_objective" => {
+            let kind = s(args, "kind");
+            let kind = if kind == "area" { "area" } else { "project" };
+            let slug = s(args, "slug");
+            let text = s(args, "text");
+            vault::add_objective(&v, kind, &slug, &text).map_err(|e| e.to_string())?;
+            Ok(format!("Added an objective to {slug}."))
+        }
+
+        "daybook_complete_objective" => {
+            let kind = s(args, "kind");
+            let kind = if kind == "area" { "area" } else { "project" };
+            let slug = s(args, "slug");
+            let index = args
+                .get("index")
+                .and_then(|n| n.as_u64())
+                .ok_or("index is required")? as usize;
+            let done = args.get("done").and_then(|b| b.as_bool()).unwrap_or(true);
+            vault::set_objective_done(&v, kind, &slug, index, done)
+                .map_err(|e| e.to_string())?;
+            Ok(if done { "Ticked off.".into() } else { "Reopened.".to_string() })
         }
 
         "daybook_append_to_page" => {

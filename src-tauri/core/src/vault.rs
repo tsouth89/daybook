@@ -851,14 +851,6 @@ pub fn create_entity(
     if path.exists() {
         anyhow::bail!("A {kind} named '{slug}' already exists");
     }
-    let body = format!(
-        "---\nslug: {slug}\nname: {name}\ntype: {kind}\nscope: {scope}\n---\n\n\
-         # {name}\n\n\
-         ## Overview\n\n\
-         - _(nothing filed yet)_\n\n"
-    );
-    std::fs::write(&path, body)?;
-
     let meta = ProjectMeta {
         slug: slug.clone(),
         name: name.to_string(),
@@ -874,6 +866,10 @@ pub fn create_entity(
         known.push(meta.clone());
         write_projects_config(v, &known)?;
     }
+
+    // Built by the same renderer the rest of the app uses, so a page created
+    // here has the same four sections as one that grew from a capture.
+    render_entity_page(v, kind, &slug, crate::datetime::DEFAULT_DATE_FORMAT)?;
     Ok(meta)
 }
 
