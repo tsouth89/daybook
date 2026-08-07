@@ -15,8 +15,10 @@ import SearchView from "./views/SearchView";
 import SettingsView from "./views/SettingsView";
 import TasksView from "./views/TasksView";
 import TodayView from "./views/TodayView";
+import HomeView from "./views/HomeView";
 
 type Tab =
+  | "home"
   | "today"
   | "inbox"
   | "days"
@@ -49,7 +51,7 @@ function isTypingTarget(el: EventTarget | null): boolean {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("today");
+  const [tab, setTab] = useState<Tab>("home");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [days, setDays] = useState<DayEntry[]>([]);
   const [inboxCount, setInboxCount] = useState(0);
@@ -167,6 +169,7 @@ export default function App() {
         return;
       }
       const map: Record<string, Tab> = {
+        h: "home",
         t: "today",
         i: "inbox",
         d: "days",
@@ -210,6 +213,7 @@ export default function App() {
                     onClick: () => void api.showCapture(),
                   },
                   { kind: "sep" },
+                  { label: "Go to Home", shortcut: "⌃⇧H", onClick: () => goTab("home") },
                   { label: "Go to Today", shortcut: "⌃⇧T", onClick: () => goTab("today") },
                   { label: "Go to Inbox", shortcut: "⌃⇧I", onClick: () => goTab("inbox") },
                   { label: "Go to Days", shortcut: "⌃⇧D", onClick: () => goTab("days") },
@@ -229,6 +233,7 @@ export default function App() {
               </button>
               {(
                 [
+                  ["home", "Home"],
                   ["today", todayPending ? `Today (${todayPending})` : "Today"],
                   ["inbox", inboxCount ? `Inbox (${inboxCount})` : "Inbox"],
                   ["days", "Days"],
@@ -311,6 +316,19 @@ export default function App() {
                 </div>
               )}
 
+              {tab === "home" &&
+                (todayIso ? (
+                  <HomeView
+                    date={todayIso}
+                    onChanged={onChanged}
+                    onError={setBanner}
+                    onNotice={flash}
+                  />
+                ) : (
+                  <div className="empty">
+                    <h2>Loading…</h2>
+                  </div>
+                ))}
               {tab === "today" &&
                 (todayIso ? (
                   <TodayView

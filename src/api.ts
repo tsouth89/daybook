@@ -115,6 +115,12 @@ export type EntryQuery = {
   limit?: number;
 };
 
+export type RebuildReport = {
+  recovered: number;
+  kept: number;
+  tasks_marked: number;
+};
+
 export type ItemProcessResult = {
   id: string;
   date: string;
@@ -146,6 +152,9 @@ export const api = {
     invoke<Backlink[]>("list_backlinks", { target }),
   queryEntries: (query: EntryQuery = {}) =>
     invoke<Entry[]>("query_entries", { query }),
+  rebuildEntryIndex: () => invoke<RebuildReport>("rebuild_entry_index"),
+  setTaskDone: (entryId: string, done: boolean) =>
+    invoke<void>("set_task_done", { entryId, done }),
   saveAttachment: (dataBase64: string, ext: string) =>
     invoke<string>("save_attachment", { dataBase64, ext }),
   attachmentDataUrl: (rel: string) => invoke<string>("attachment_data_url", { rel }),

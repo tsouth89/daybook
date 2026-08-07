@@ -169,6 +169,45 @@ pub fn marker_id_of(line: &str) -> Option<String> {
     marker_id(line)
 }
 
+/// Tick or untick a task by record id. The markdown is what changes — the index
+/// holds no done state of its own, so this stays true whether the box is
+/// flipped here or by hand in Obsidian.
+pub fn set_task_done(v: &Path, entry_id: &str, done: bool) -> Result<()> {
+    let path = crate::vault::tasks_path(v);
+    let text = std::fs::read_to_string(&path)?;
+    let mut changed = false;
+    let out: Vec<String> = text
+        .lines()
+        .map(|line| {
+            if changed || marker_id(line).as_deref() != Some(entry_id) {
+                return line.to_string();
+            }
+            let t = line.trim_start();
+            let rest = match t
+                .strip_prefix("- [ ]")
+                .or_else(|| t.strip_prefix("- [x]"))
+                .or_else(|| t.strip_prefix("- [X]"))
+            {
+                Some(r) => r,
+                None => return line.to_string(),
+            };
+            changed = true;
+            let indent = &line[..line.len() - t.len()];
+            format!("{indent}- [{}]{rest}", if done { "x" } else { " " })
+        })
+        .collect();
+
+    if !changed {
+        anyhow::bail!("No task in tasks.md with id {entry_id}");
+    }
+    let mut joined = out.join("\n");
+    if !joined.ends_with('\n') {
+        joined.push('\n');
+    }
+    std::fs::write(&path, joined)?;
+    Ok(())
+}
+
 /// Pull `{id}` out of an `<!-- e:{id} -->` marker.
 fn marker_id(line: &str) -> Option<String> {
     let start = line.find("<!-- e:")? + "<!-- e:".len();
@@ -364,6 +403,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(task_state(&v).get("cap-1-e0"), Some(&true));
+    }
+
+    #[test]
+    fn ticking_a_task_writes_through_to_the_markdown() {
+        let v = tmp();
+        crate::vault::append_task(
+            &v, "2026-08-06", "work", "Write tests", None, "DD/MM/YYYY", "cap-1-e0", None,
+        )
+        .unwrap();
+
+        set_task_done(&v, "cap-1-e0", true).unwrap();
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(text.contains("- [x] <!-- e:cap-1-e0 -->"), "got: {text}");
+        assert_eq!(task_state(&v).get("cap-1-e0"), Some(&true));
+
+        set_task_done(&v, "cap-1-e0", false).unwrap();
+        assert_eq!(task_state(&v).get("cap-1-e0"), Some(&false));
+        // The rest of the line is untouched by the flip.
+        let text = std::fs::read_to_string(crate::vault::tasks_path(&v)).unwrap();
+        assert!(text.contains("Write tests"));
+
+        assert!(set_task_done(&v, "no-such-id", true).is_err());
     }
 
     #[test]

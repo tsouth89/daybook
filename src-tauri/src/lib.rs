@@ -124,6 +124,11 @@ fn query_entries(
     Ok(entries::query(&state.settings().vault(), &query))
 }
 
+#[tauri::command]
+fn set_task_done(state: tauri::State<AppState>, entry_id: String, done: bool) -> CmdResult<()> {
+    entries::set_task_done(&state.settings().vault(), &entry_id, done).map_err(err)
+}
+
 /// Recover item records from markdown written before the index existed. Costs
 /// nothing — it parses the vault rather than re-triaging through the model.
 #[tauri::command]
@@ -1010,6 +1015,7 @@ pub fn run() {
             list_backlinks,
             query_entries,
             rebuild_entry_index,
+            set_task_done,
             save_attachment,
             attachment_data_url,
             hide_capture,
