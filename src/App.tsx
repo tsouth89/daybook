@@ -428,6 +428,7 @@ export default function App() {
               {tab === "today" &&
                 (todayIso ? (
                   <TodayView
+                    refreshTick={refreshTick}
                     date={todayIso}
                     vaultPath={vaultPath}
                     onChanged={onChanged}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errText, type InboxItem, type InboxProcessResult } from "../api";
 import Backlinks from "../Backlinks";
+import DayDigest from "../DayDigest";
 import { ContextMenu, copyText, useContextMenu } from "../ContextMenu";
 import { useFormat } from "../FormatContext";
 import Markdown from "../Markdown";
@@ -12,6 +13,7 @@ import { useViewHandlers } from "../viewhost";
 type Props = {
   /** ISO date for today, from the backend clock. */
   date: string;
+  refreshTick?: number;
   vaultPath: string;
   onChanged: () => void;
   onError: (m: string) => void;
@@ -19,7 +21,14 @@ type Props = {
 };
 
 /** Landing view: today's day note plus whatever is still waiting in the inbox. */
-export default function TodayView({ date, vaultPath, onChanged, onError, onNotice }: Props) {
+export default function TodayView({
+  date,
+  refreshTick,
+  vaultPath,
+  onChanged,
+  onError,
+  onNotice,
+}: Props) {
   const [note, setNote] = useState("");
   const [pending, setPending] = useState<InboxItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -195,6 +204,9 @@ export default function TodayView({ date, vaultPath, onChanged, onError, onNotic
       {result && <ProcessResult result={result} label="Filed" />}
 
       <div className={`content ${editing !== null ? "has-editor" : ""}`}>
+        {editing === null && (
+          <DayDigest date={date} refreshTick={refreshTick} onError={onError} />
+        )}
         {editing !== null ? (
           <NoteEditor
             value={editing}
