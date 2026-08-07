@@ -141,6 +141,53 @@ Default model is GPT-5.6 Luna (~$0.20/$1.20 per Mtok). A normal month of triage 
 a dollar. Terra and Anthropic Claude are available if you need more power; DeepSeek remains an
 option if you ever want the absolute cheapest pass.
 
+## Letting an assistant drive it
+
+Daybook ships an MCP server, so Claude (or any MCP client) can capture,
+search, and file things for you: *"log that I fixed the auth bug on Toolport"*,
+*"what's still open on the BMX site?"*, *"add a task to renew the domain"*.
+
+It is a separate binary from the app, because the vault is already the API —
+plain Markdown plus a regenerable index. That means it works whether or not
+Daybook is running, and there is no second source of truth to keep in step.
+
+Point your client at it. For Claude Desktop, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "daybook": {
+      "command": "C:\\Program Files\\Daybook\\daybook-mcp.exe"
+    }
+  }
+}
+```
+
+Or `claude mcp add daybook -- "C:\Program Files\Daybook\daybook-mcp.exe"`.
+Running from a checkout, the binary is at `src-tauri/target/release/daybook-mcp.exe`.
+
+| Tool | Does |
+|---|---|
+| `daybook_capture` | Drops text into the inbox; normal triage files it |
+| `daybook_search` | Query entries by text, project, kind, scope, open loops |
+| `daybook_list_projects` | Every project and area with status, parent, activity |
+| `daybook_read_page` | A project or area page as Markdown |
+| `daybook_add_task` | Task with optional project and due date |
+| `daybook_complete_task` | Tick one off |
+| `daybook_create_page` | New project or area, optionally nested |
+| `daybook_append_to_page` | Dated notes onto a page |
+
+It reads the same settings the app does, so both see one vault. Set
+`DAYBOOK_VAULT` to point it somewhere else.
+
+Two deliberate limits. **Nothing here deletes a page** — the destructive
+actions stay in the app, where the trash can undo them. And writes go through
+the same functions the app uses, so trash, task-line rewriting, and index
+invariants all hold rather than being reimplemented and drifting.
+
+Because two processes can now write the index, `config/entries.jsonl` is
+guarded by a lockfile; a lock left behind by a killed process is broken on age.
+
 ## Installing
 
 ```sh
@@ -154,6 +201,7 @@ Produces three things under `src-tauri/target/release/`:
 | Installer (recommended) | `bundle/nsis/Daybook_<ver>_x64-setup.exe` | Normal install, Start-menu entry, uninstaller |
 | MSI | `bundle/msi/Daybook_<ver>_x64_en-US.msi` | Group-policy / scripted installs |
 | Bare executable | `daybook.exe` | Run from anywhere without installing |
+| MCP server | `daybook-mcp.exe` | Let an assistant read and write the vault |
 
 The bare `daybook.exe` runs on its own — Windows 11 already ships the WebView2
 runtime it needs. It is not *fully* portable, though: settings and API keys live

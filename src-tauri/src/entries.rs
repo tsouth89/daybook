@@ -110,7 +110,64 @@ pub fn load(v: &Path) -> Vec<EntryRecord> {
 }
 
 pub fn write_all_records(v: &Path, records: &[EntryRecord]) -> Result<()> {
-    write_all(v, records)
+    with_lock(v, || write_all(v, records))
+}
+
+/// A cross-process advisory lock around read-modify-write of the index.
+///
+/// The app and the MCP server are separate processes writing the same file, so
+/// "load, change, save" can lose an update. An atomic `create_new` lockfile is
+/// enough: contention is rare and brief, and a lock left behind by a killed
+/// process is broken on age rather than stranding the index forever.
+fn with_lock<T>(v: &Path, f: impl FnOnce() -> Result<T>) -> Result<T> {
+    let dir = crate::vault::config_dir(v);
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("entries.lock");
+
+    let start = std::time::Instant::now();
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => break,
+            Err(_) => {
+                let stale = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| d.as_secs() > 30)
+                    .unwrap_or(true);
+                if stale {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                if start.elapsed().as_secs() >= 5 {
+                    anyhow::bail!("The entry index is busy; try again.");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+        }
+    }
+
+    let result = f();
+    // Released even if `f` failed, or the next writer waits out the full stale
+    // timeout for no reason.
+    let _ = std::fs::remove_file(&path);
+    result
+}
+
+/// Load, change, save — under the lock, which is the only safe way to do it
+/// when another process may be doing the same thing.
+fn mutate<T>(v: &Path, f: impl FnOnce(&mut Vec<EntryRecord>) -> Result<T>) -> Result<T> {
+    with_lock(v, || {
+        let mut all = load(v);
+        let out = f(&mut all)?;
+        all.sort_by(|a, b| (&a.date, &a.time, &a.id).cmp(&(&b.date, &b.time, &b.id)));
+        write_all(v, &all)?;
+        Ok(out)
+    })
 }
 
 fn write_all(v: &Path, records: &[EntryRecord]) -> Result<()> {
@@ -127,22 +184,19 @@ fn write_all(v: &Path, records: &[EntryRecord]) -> Result<()> {
 /// Replace every record belonging to one capture. Reprocessing the same item
 /// updates in place instead of accumulating duplicates.
 pub fn replace_item(v: &Path, item_id: &str, records: &[EntryRecord]) -> Result<()> {
-    let mut all = load(v);
-    all.retain(|r| r.item_id != item_id);
-    all.extend(records.iter().cloned());
-    all.sort_by(|a, b| (&a.date, &a.time, &a.id).cmp(&(&b.date, &b.time, &b.id)));
-    write_all(v, &all)
+    mutate(v, |all| {
+        all.retain(|r| r.item_id != item_id);
+        all.extend(records.iter().cloned());
+        Ok(())
+    })
 }
 
 /// Drop a capture's records, for when an item is removed rather than reprocessed.
 pub fn remove_item(v: &Path, item_id: &str) -> Result<()> {
-    let mut all = load(v);
-    let before = all.len();
-    all.retain(|r| r.item_id != item_id);
-    if all.len() == before {
-        return Ok(());
-    }
-    write_all(v, &all)
+    mutate(v, |all| {
+        all.retain(|r| r.item_id != item_id);
+        Ok(())
+    })
 }
 
 /// Which task entries are ticked off, read back from `tasks.md`.
@@ -918,31 +972,31 @@ fn remove_task_line(v: &Path, entry_id: &str) -> Result<()> {
 /// rather than a patch — this is a single-user local app, and read-modify-write
 /// on one file avoids inventing a merge story for no benefit.
 pub fn update_entry(v: &Path, updated: &EntryRecord, date_fmt: &str) -> Result<()> {
-    let mut all = load(v);
-    let Some(slot) = all.iter_mut().find(|r| r.id == updated.id) else {
-        anyhow::bail!("No entry with id {}", updated.id);
-    };
-    // Identity and provenance are not the caller's to change.
-    let mut next = updated.clone();
-    next.item_id = slot.item_id.clone();
-    next.source = slot.source.clone();
-    if next.kind.trim().is_empty() {
-        next.kind = slot.kind.clone();
-    }
-    if next.date.trim().is_empty() {
-        next.date = slot.date.clone();
-    }
-    if let Some(d) = &next.due {
-        if d.trim().is_empty() {
-            next.due = None;
-        } else {
-            crate::vault::valid_date(d)?;
+    let next = mutate(v, |all| {
+        let Some(slot) = all.iter_mut().find(|r| r.id == updated.id) else {
+            anyhow::bail!("No entry with id {}", updated.id);
+        };
+        // Identity and provenance are not the caller's to change.
+        let mut next = updated.clone();
+        next.item_id = slot.item_id.clone();
+        next.source = slot.source.clone();
+        if next.kind.trim().is_empty() {
+            next.kind = slot.kind.clone();
         }
-    }
-    crate::vault::valid_date(&next.date)?;
-    *slot = next.clone();
-    all.sort_by(|a, b| (&a.date, &a.time, &a.id).cmp(&(&b.date, &b.time, &b.id)));
-    write_all(v, &all)?;
+        if next.date.trim().is_empty() {
+            next.date = slot.date.clone();
+        }
+        if let Some(d) = &next.due {
+            if d.trim().is_empty() {
+                next.due = None;
+            } else {
+                crate::vault::valid_date(d)?;
+            }
+        }
+        crate::vault::valid_date(&next.date)?;
+        *slot = next.clone();
+        Ok(next)
+    })?;
 
     if next.kind == "task" {
         rewrite_task_line(v, &next, date_fmt)?;
@@ -953,23 +1007,22 @@ pub fn update_entry(v: &Path, updated: &EntryRecord, date_fmt: &str) -> Result<(
 /// Drop one entry. For tasks the markdown line goes too, since it is a pure
 /// rendering; other kinds leave their prose alone because you may have edited it.
 pub fn delete_entry(v: &Path, entry_id: &str) -> Result<()> {
-    let mut all = load(v);
-    let before = all.len();
-    let doomed = all.iter().find(|r| r.id == entry_id).cloned();
-    let was_task = doomed.as_ref().map(|r| r.kind == "task").unwrap_or(false);
-    all.retain(|r| r.id != entry_id);
-    if all.len() == before {
-        anyhow::bail!("No entry with id {entry_id}");
-    }
-    if let Some(record) = doomed {
-        let label = if record.title.trim().is_empty() {
-            record.kind.clone()
-        } else {
-            record.title.clone()
+    let was_task = mutate(v, |all| {
+        let Some(doomed) = all.iter().find(|r| r.id == entry_id).cloned() else {
+            anyhow::bail!("No entry with id {entry_id}");
         };
-        crate::trash::put(v, &label, crate::trash::Payload::Entry { record })?;
-    }
-    write_all(v, &all)?;
+        all.retain(|r| r.id != entry_id);
+        let was_task = doomed.kind == "task";
+        let label = if doomed.title.trim().is_empty() {
+            doomed.kind.clone()
+        } else {
+            doomed.title.clone()
+        };
+        // Trashed before the index is written, so a failure here means nothing
+        // has been removed yet.
+        crate::trash::put(v, &label, crate::trash::Payload::Entry { record: doomed })?;
+        Ok(was_task)
+    })?;
     if was_task {
         remove_task_line(v, entry_id)?;
     }
@@ -979,16 +1032,17 @@ pub fn delete_entry(v: &Path, entry_id: &str) -> Result<()> {
 /// Close one open loop. These are the things Home nags about, so being able to
 /// say "that's settled" without editing prose is the whole point of listing them.
 pub fn resolve_open(v: &Path, entry_id: &str, line: &str) -> Result<()> {
-    let mut all = load(v);
-    let Some(slot) = all.iter_mut().find(|r| r.id == entry_id) else {
-        anyhow::bail!("No entry with id {entry_id}");
-    };
-    let before = slot.open.len();
-    slot.open.retain(|o| o.trim() != line.trim());
-    if slot.open.len() == before {
-        anyhow::bail!("That loop is not on entry {entry_id}");
-    }
-    write_all(v, &all)
+    mutate(v, |all| {
+        let Some(slot) = all.iter_mut().find(|r| r.id == entry_id) else {
+            anyhow::bail!("No entry with id {entry_id}");
+        };
+        let before = slot.open.len();
+        slot.open.retain(|o| o.trim() != line.trim());
+        if slot.open.len() == before {
+            anyhow::bail!("That loop is not on entry {entry_id}");
+        }
+        Ok(())
+    })
 }
 
 /// Create an entry by hand, with no capture behind it. Notion lets you just add
@@ -1037,9 +1091,10 @@ pub fn create_entry(v: &Path, mut r: EntryRecord, date_fmt: &str) -> Result<Entr
         )?;
     }
 
-    let mut all = load(v);
-    all.push(r.clone());
-    all.sort_by(|a, b| (&a.date, &a.time, &a.id).cmp(&(&b.date, &b.time, &b.id)));
-    write_all(v, &all)?;
-    Ok(r)
+    let made = r.clone();
+    mutate(v, |all| {
+        all.push(r);
+        Ok(())
+    })?;
+    Ok(made)
 }

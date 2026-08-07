@@ -1,10 +1,10 @@
-mod ai;
-mod config;
-mod backfill;
-mod datetime;
-mod entries;
-mod trash;
-mod vault;
+pub mod ai;
+pub mod config;
+pub mod backfill;
+pub mod datetime;
+pub mod entries;
+pub mod trash;
+pub mod vault;
 
 use base64::Engine;
 use config::Settings;
